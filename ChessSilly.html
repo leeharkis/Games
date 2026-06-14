@@ -400,18 +400,6 @@ function drawCaptures(){
     var botEl=document.getElementById("captures-black");
     topEl.innerHTML="";botEl.innerHTML="";
     var pSize=Math.round(SQ*0.8);
-    var gap=2;
-    var padding=2;
-    var innerW=(pSize*3)+(gap*2)+(padding*2);
-    var panelPad=6;
-    var panelBorder=1;
-    var panelW=innerW+(panelPad*2)+(panelBorder*2);
-    var panel=document.querySelector(".captures-panel");
-    var rightPanel=document.querySelector(".right-panel");
-    rightPanel.style.width=panelW+"px";
-    panel.style.width=panelW+"px";
-    topEl.style.width=innerW+"px";
-    botEl.style.width=innerW+"px";
     var sortedW=capturedWhite.slice().sort(function(a,b){return order[a]-order[b];});
     var sortedB=capturedBlack.slice().sort(function(a,b){return order[a]-order[b];});
     for(var i=0;i<sortedW.length;i++){var img=document.createElement("img");img.src=pieceImages["w"+sortedW[i]].src;img.style.width=pSize+"px";img.style.height=pSize+"px";topEl.appendChild(img);}
