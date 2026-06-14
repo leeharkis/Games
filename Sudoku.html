@@ -139,17 +139,17 @@ button {
     padding: 15px;
     box-shadow: 0 10px 40px rgba(0,0,0,0.3);
     z-index: 100;
-    display: flex;
-    flex-direction: row;
+    display: grid;
+    grid-template-columns: auto auto;
     gap: 15px;
     width: fit-content;
     justify-content: center;
 }
 
 .keypad-section {
-    display: flex;
-    flex-direction: column;
-    gap: 15px;
+    display: grid;
+    grid-template-columns: repeat(3, 50px) auto;
+    gap: 8px;
 }
 
 .grid {
@@ -234,10 +234,52 @@ button {
     display: grid;
     grid-template-columns: repeat(3, 50px);
     gap: 8px;
+    grid-column: 1 / 2;
+    grid-row: 1 / 3;
+}
+
+.keypad-actions {
+    display: grid;
+    grid-template-columns: 50px;
+    gap: 8px;
+    grid-column: 2 / 3;
+    grid-row: 1 / 2;
+}
+
+#new-game-btn {
+    background: #667eea !important;
+    color: white !important;
+    border-color: #667eea !important;
+}
+
+#new-game-btn:hover {
+    background: #5568d3 !important;
+    border-color: #5568d3 !important;
+}
+
+#clear-btn {
+    background: #ff6b6b !important;
+    color: white !important;
+    border-color: #ff6b6b !important;
+}
+
+#clear-btn:hover {
+    background: #ee5a52 !important;
+    border-color: #ee5a52 !important;
+}
+
+#hint-btn-mobile {
+    background: #f093fb !important;
+    color: white !important;
+    border-color: #f093fb !important;
+}
+
+#hint-btn-mobile:hover {
+    background: #e074db !important;
+    border-color: #e074db !important;
 }
 
 #delete-btn {
-    grid-column: 1 / -1;
     background: #f0f0f0 !important;
     color: #9c27b0 !important;
     border-color: #ddd !important;
@@ -245,6 +287,7 @@ button {
     height: auto !important;
     width: auto !important;
     font-weight: bold !important;
+    grid-column: 1 / -1;
 }
 
 #delete-btn:hover {
@@ -290,45 +333,6 @@ button {
 
 .num-btn:active {
     transform: scale(0.95);
-}
-
-.keypad-actions {
-    display: grid;
-    grid-template-columns: 50px;
-    gap: 8px;
-}
-
-#new-game-btn {
-    background: #667eea !important;
-    color: white !important;
-    border-color: #667eea !important;
-}
-
-#new-game-btn:hover {
-    background: #5568d3 !important;
-    border-color: #5568d3 !important;
-}
-
-#clear-btn {
-    background: #ff6b6b !important;
-    color: white !important;
-    border-color: #ff6b6b !important;
-}
-
-#clear-btn:hover {
-    background: #ee5a52 !important;
-    border-color: #ee5a52 !important;
-}
-
-#hint-btn-mobile {
-    background: #f093fb !important;
-    color: white !important;
-    border-color: #f093fb !important;
-}
-
-#hint-btn-mobile:hover {
-    background: #e074db !important;
-    border-color: #e074db !important;
 }
 
 .completion-modal {
@@ -507,6 +511,7 @@ button {
                 <button class="num-btn" data-num="7">7</button>
                 <button class="num-btn" data-num="8">8</button>
                 <button class="num-btn" data-num="9">9</button>
+                <button class="num-btn" id="delete-btn">DELETE</button>
             </div>
             
             <div class="keypad-actions">
@@ -515,8 +520,6 @@ button {
                 <button class="num-btn" id="hint-btn-mobile">HNT</button>
             </div>
         </div>
-        
-        <button class="num-btn" id="delete-btn">DELETE</button>
     </div>
 
     <div class="message" id="message"></div>
