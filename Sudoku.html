@@ -517,6 +517,7 @@ button {
             <button class="num-btn" data-num="9">9</button>
             <button class="num-btn" id="hint-btn-mobile">HNT</button>
             <button class="num-btn" id="delete-btn">DELETE</button>
+            <button class="num-btn" id="check-btn" style="background: #4caf50 !important; color: white !important; border-color: #4caf50 !important;">CHK</button>
         </div>
     </div>
 
@@ -953,6 +954,20 @@ class Sudoku {
 
         if (hasError) {
             this.showMessage('❌ Some numbers conflict!', 'error');
+        } else if (this.isComplete() && this.isSolved()) {
+            this.stopTimer();
+            const elapsed = Math.floor((Date.now() - this.startTime) / 1000);
+            const isTopScore = this.addScore(elapsed, this.hintsUsed, this.difficultyLevel);
+            const minutes = Math.floor(elapsed / 60);
+            const seconds = elapsed % 60;
+            const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            
+            let msg = `🎉 Solved! ${timeStr} | Hints: ${this.hintsUsed}`;
+            if (isTopScore) {
+                msg += ' 🏆 TOP 10!';
+            }
+            this.showCompletionModal(msg);
+            this.showTopScores();
         } else {
             this.showMessage('✓ No conflicts found!', 'success');
         }
