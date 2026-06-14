@@ -399,24 +399,21 @@ function drawCaptures(){
     var topEl=document.getElementById("captures-white");
     var botEl=document.getElementById("captures-black");
     topEl.innerHTML="";botEl.innerHTML="";
-    var pSize=Math.round(SQ*0.8);
-    var halfPSize=Math.round(pSize*0.5);
+    var pSize=Math.round(SQ*0.4);
     var sortedW=capturedWhite.slice().sort(function(a,b){return order[a]-order[b];});
     var sortedB=capturedBlack.slice().sort(function(a,b){return order[a]-order[b];});
     for(var i=0;i<sortedW.length;i++){
         var img=document.createElement("img");
         img.src=pieceImages["w"+sortedW[i]].src;
-        var size=i<6?pSize:halfPSize;
-        img.style.width=size+"px";
-        img.style.height=size+"px";
+        img.style.width=pSize+"px";
+        img.style.height=pSize+"px";
         topEl.appendChild(img);
     }
     for(var j=0;j<sortedB.length;j++){
         var img2=document.createElement("img");
         img2.src=pieceImages["b"+sortedB[j]].src;
-        var size2=j<6?pSize:halfPSize;
-        img2.style.width=size2+"px";
-        img2.style.height=size2+"px";
+        img2.style.width=pSize+"px";
+        img2.style.height=pSize+"px";
         botEl.appendChild(img2);
     }
 }
