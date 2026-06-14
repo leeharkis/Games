@@ -139,8 +139,8 @@ button {
     padding: 15px;
     box-shadow: 0 10px 40px rgba(0,0,0,0.3);
     z-index: 100;
-    display: grid;
-    grid-template-columns: auto auto;
+    display: flex;
+    flex-direction: column;
     gap: 15px;
     width: fit-content;
     justify-content: center;
@@ -148,8 +148,27 @@ button {
 
 .keypad-section {
     display: grid;
-    grid-template-columns: repeat(3, 50px) auto;
+    grid-template-columns: repeat(4, 50px);
     gap: 8px;
+}
+
+.keypad {
+    display: contents;
+}
+
+.keypad-actions {
+    display: contents;
+}
+
+#delete-btn {
+    background: #f0f0f0 !important;
+    color: #9c27b0 !important;
+    border-color: #ddd !important;
+    padding: 12px !important;
+    height: auto !important;
+    width: auto !important;
+    font-weight: bold !important;
+    grid-column: 1 / -1;
 }
 
 .grid {
@@ -246,6 +265,29 @@ button {
     grid-row: 1 / 2;
 }
 
+#delete-btn {
+    background: #f0f0f0 !important;
+    color: #9c27b0 !important;
+    border-color: #ddd !important;
+    padding: 12px !important;
+    height: auto !important;
+    width: auto !important;
+    font-weight: bold !important;
+    grid-column: 1 / -1;
+}
+
+#delete-btn:hover {
+    background: #e8e8e8 !important;
+    border-color: #bbb !important;
+}
+
+#delete-btn.active {
+    background: #9c27b0 !important;
+    color: white !important;
+    border-color: #9c27b0 !important;
+    box-shadow: 0 0 10px rgba(156, 39, 176, 0.5) !important;
+}
+
 #new-game-btn {
     background: #667eea !important;
     color: white !important;
@@ -277,29 +319,6 @@ button {
 #hint-btn-mobile:hover {
     background: #e074db !important;
     border-color: #e074db !important;
-}
-
-#delete-btn {
-    background: #f0f0f0 !important;
-    color: #9c27b0 !important;
-    border-color: #ddd !important;
-    padding: 12px !important;
-    height: auto !important;
-    width: auto !important;
-    font-weight: bold !important;
-    grid-column: 1 / -1;
-}
-
-#delete-btn:hover {
-    background: #e8e8e8 !important;
-    border-color: #bbb !important;
-}
-
-#delete-btn.active {
-    background: #9c27b0 !important;
-    color: white !important;
-    border-color: #9c27b0 !important;
-    box-shadow: 0 0 10px rgba(156, 39, 176, 0.5) !important;
 }
 
 .num-btn {
