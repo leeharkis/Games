@@ -23,9 +23,9 @@ button.undo-btn{background:#7ecf7e;color:#000;border:none;padding:8px 0;border-r
 button.undo-btn:hover{background:#5eb85e}
 .board-container{position:relative;display:flex;flex-direction:column;gap:10px;align-items:center}
 canvas#board{border:2px solid #0f3460;border-radius:4px;cursor:pointer;display:block;flex-shrink:0}
-.captures-panel{display:flex;flex-direction:column;background:#f0d9b5;border:1px solid #0f3460;border-radius:6px;padding:6px;width:100%;max-width:calc(8 * 60px);gap:6px}
-.right-panel{display:flex;flex-direction:column;gap:6px;width:100%}
-.captures-top,.captures-bottom{display:flex;flex-wrap:wrap;gap:2px;padding:2px;background:#b58863;border-radius:4px;align-content:flex-start;min-height:40px}
+.captures-panel{display:flex;flex-direction:row;background:#f0d9b5;border:1px solid #0f3460;border-radius:6px;padding:6px;width:100%;max-width:calc(8 * 60px);gap:6px}
+.right-panel{display:flex;flex-direction:row;gap:6px;width:100%;max-width:calc(8 * 60px)}
+.captures-top,.captures-bottom{display:flex;flex-wrap:wrap;gap:2px;padding:2px;background:#b58863;border-radius:4px;align-content:flex-start;flex:1;min-height:40px}
 .captures-top img,.captures-bottom img{display:block}
 .status{margin-top:10px;font-size:14px;min-height:20px;text-align:center;color:#a8d8ea}
 .promotion-modal{display:none;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:#16213e;border:2px solid #0f3460;border-radius:10px;padding:20px;z-index:100;text-align:center}
