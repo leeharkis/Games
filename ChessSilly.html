@@ -19,11 +19,11 @@ h1{font-size:20px;margin:8px 0;color:#ffffff;letter-spacing:1px}
 .rank-control .rank-val{font-size:14px;font-weight:bold;min-width:20px;text-align:center}
 button.action-btn{background:#e94560;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:bold}
 button.action-btn:hover{background:#c23152}
-button.undo-btn{background:#7ecf7e;color:#000;border:none;padding:8px 0;border-radius:6px;cursor:pointer;font-size:13px;font-weight:bold;width:100%}
+button.undo-btn{background:#7ecf7e;color:#000;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:bold;min-width:50px;flex-shrink:0}
 button.undo-btn:hover{background:#5eb85e}
 .board-container{position:relative;display:flex;flex-direction:column;gap:10px;align-items:center}
 canvas#board{border:2px solid #0f3460;border-radius:4px;cursor:pointer;display:block;flex-shrink:0}
-.captures-panel{display:flex;flex-direction:row;background:#f0d9b5;border:1px solid #0f3460;border-radius:6px;padding:6px;width:100%;max-width:calc(8 * 60px);gap:6px}
+.captures-panel{display:flex;flex-direction:row;background:transparent;border:none;border-radius:0;padding:0;width:100%;gap:6px;flex:1}
 .right-panel{display:flex;flex-direction:row;gap:6px;width:100%;max-width:calc(8 * 60px)}
 .captures-top,.captures-bottom{display:flex;flex-wrap:nowrap;gap:2px;padding:2px;background:#b58863;border-radius:4px;align-content:flex-start;flex:1;min-height:40px;overflow-x:auto}
 .captures-top img,.captures-bottom img{display:block}
