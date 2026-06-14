@@ -21,10 +21,10 @@ button.action-btn{background:#e94560;color:#fff;border:none;padding:8px 14px;bor
 button.action-btn:hover{background:#c23152}
 button.undo-btn{background:#7ecf7e;color:#000;border:none;padding:8px 0;border-radius:6px;cursor:pointer;font-size:13px;font-weight:bold;width:100%}
 button.undo-btn:hover{background:#5eb85e}
-.board-container{position:relative;display:flex;gap:10px;align-items:stretch}
+.board-container{position:relative;display:flex;flex-direction:column;gap:10px;align-items:center}
 canvas#board{border:2px solid #0f3460;border-radius:4px;cursor:pointer;display:block;flex-shrink:0}
-.captures-panel{display:flex;flex-direction:column;justify-content:space-between;background:#f0d9b5;border:1px solid #0f3460;border-radius:6px;padding:6px;flex:1}
-.right-panel{display:flex;flex-direction:column;gap:6px}
+.captures-panel{display:flex;flex-direction:row;background:#f0d9b5;border:1px solid #0f3460;border-radius:6px;padding:6px;width:100%;justify-content:center;gap:20px}
+.right-panel{display:flex;flex-direction:column;gap:6px;width:100%}
 .captures-top,.captures-bottom{display:flex;flex-wrap:wrap;gap:2px;padding:2px;background:#b58863;border-radius:4px;align-content:flex-start;min-height:60px}
 .captures-top img,.captures-bottom img{display:block}
 .status{margin-top:10px;font-size:14px;min-height:20px;text-align:center;color:#a8d8ea}
