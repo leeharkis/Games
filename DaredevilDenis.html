@@ -157,8 +157,12 @@ function update() {
     // Wrap to next platform when hitting right edge
     if (denis.x + denis.w > W) {
         if (denis.platform < NUM_PLATFORMS - 1) {
-            // Move to next row - keep momentum and jump intact
+            // Move to next row - keep momentum, adjust Y relative to new platform
+            var oldPlatY = platforms[denis.platform];
+            var offsetFromPlat = denis.y - (oldPlatY - denis.h);
             denis.platform++;
+            var newPlatY = platforms[denis.platform];
+            denis.y = (newPlatY - denis.h) + offsetFromPlat;
             denis.x = 0;
         } else {
             // Reached right side of 4th row - level complete!
