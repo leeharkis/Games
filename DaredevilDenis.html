@@ -32,8 +32,8 @@ for (var i = 0; i < NUM_PLATFORMS; i++) {
     platforms.push(HUD_H + (i + 1) * PLAT_SPACING - 15);
 }
 
-var GRAVITY = 0.5;
-var JUMP_FORCE = -12;
+var GRAVITY = 0.4;
+var JUMP_FORCE = -7;
 var MAX_SPEED = 6;
 var ACCEL = 0.12;
 var BRAKE = 0.08;
@@ -140,10 +140,16 @@ function update() {
         if (denis.vx > 0) denis.vx = Math.max(0, denis.vx - FRICTION);
     }
     
-    // Jump
+    // Jump - variable height: tap for small hop, hold for longer float
     if (input.jump && denis.onGround) {
         denis.vy = JUMP_FORCE;
         denis.onGround = false;
+    }
+    
+    // Holding space gives extra lift (but limited)
+    if (input.jump && !denis.onGround && denis.vy < 0) {
+        denis.vy -= 0.15; // reduce gravity effect while holding
+        if (denis.vy < -8) denis.vy = -8; // cap max height
     }
     
     // Gravity
