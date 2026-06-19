@@ -157,14 +157,9 @@ function update() {
     // Wrap to next platform when hitting right edge
     if (denis.x + denis.w > W) {
         if (denis.platform < NUM_PLATFORMS - 1) {
-            // Move to next row - land on it cleanly
+            // Move to next row - keep momentum and jump intact
             denis.platform++;
             denis.x = 0;
-            denis.y = platforms[denis.platform] - denis.h;
-            denis.vy = 0;
-            denis.vx = Math.max(denis.vx * 0.5, 0);
-            denis.onGround = true;
-            input.jump = false; // consume jump so it doesn't re-trigger
         } else {
             // Reached right side of 4th row - level complete!
             score += 500 * level;
@@ -185,7 +180,7 @@ function update() {
     // Platform collision (land on current platform)
     denis.onGround = false;
     var py = platforms[denis.platform];
-    if (denis.vy >= 0 && denis.y + denis.h >= py && denis.y + denis.h <= py + 20) {
+    if (denis.vy >= 0 && denis.y + denis.h >= py && denis.y + denis.h <= py + 25) {
         denis.y = py - denis.h;
         denis.vy = 0;
         denis.onGround = true;
