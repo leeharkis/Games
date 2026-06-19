@@ -142,14 +142,20 @@ function update() {
     
     // Jump - variable height: tap for small hop, hold for longer float
     if (input.jump && denis.onGround) {
-        denis.vy = JUMP_FORCE;
+        denis.vy = -5;
         denis.onGround = false;
     }
     
     // Holding space gives extra lift (but limited)
     if (input.jump && !denis.onGround && denis.vy < 0) {
-        denis.vy -= 0.15; // reduce gravity effect while holding
-        if (denis.vy < -8) denis.vy = -8; // cap max height
+        denis.vy -= 0.1;
+    }
+    
+    // Clamp: don't go above the row above (or top of screen for row 0)
+    var ceiling = (denis.platform > 0) ? platforms[denis.platform - 1] + PLATFORM_H + 5 : HUD_H;
+    if (denis.y < ceiling) {
+        denis.y = ceiling;
+        denis.vy = 0;
     }
     
     // Gravity
