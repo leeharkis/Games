@@ -157,12 +157,14 @@ function update() {
     // Wrap to next platform when hitting right edge
     if (denis.x + denis.w > W) {
         if (denis.platform < NUM_PLATFORMS - 1) {
-            // Move to next row
+            // Move to next row - land on it cleanly
             denis.platform++;
             denis.x = 0;
             denis.y = platforms[denis.platform] - denis.h;
             denis.vy = 0;
+            denis.vx = Math.max(denis.vx * 0.5, 0);
             denis.onGround = true;
+            input.jump = false; // consume jump so it doesn't re-trigger
         } else {
             // Reached right side of 4th row - level complete!
             score += 500 * level;
