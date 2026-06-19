@@ -1,0 +1,1183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sudoku Mobile</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    padding: 20px;
+}
+
+.container {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+    max-width: fit-content;
+    width: fit-content;
+    height: fit-content;
+}
+
+h1 {
+    text-align: left;
+    color: #333;
+    margin: 0;
+    font-size: 28px;
+}
+
+.controls {
+    display: none;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+button {
+    padding: 10px 20px;
+    font-size: 14px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: all 0.3s ease;
+}
+
+.btn-primary {
+    background: #667eea;
+    color: white;
+}
+
+.btn-primary:hover {
+    background: #5568d3;
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+}
+
+.btn-secondary {
+    background: #f093fb;
+    color: white;
+}
+
+.btn-secondary:hover {
+    background: #e074db;
+}
+
+.btn-danger {
+    background: #ff6b6b;
+    color: white;
+}
+
+.btn-danger:hover {
+    background: #ee5a52;
+}
+
+.stats {
+    display: flex;
+    justify-content: flex-end;
+    gap: 15px;
+    margin-bottom: 20px;
+    padding: 0;
+    background: transparent;
+    font-size: 14px;
+    align-items: center;
+}
+
+.stat-item {
+    text-align: center;
+}
+
+.stat-label {
+    color: #666;
+    font-size: 11px;
+    text-transform: uppercase;
+    display: block;
+}
+
+.stat-value {
+    color: #333;
+    font-size: 16px;
+    font-weight: bold;
+    display: block;
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    width: 100%;
+}
+
+.game-wrapper {
+    display: flex;
+    gap: 20px;
+    justify-content: flex-start;
+    align-items: flex-start;
+    margin: 0 auto;
+}
+
+.grid-container {
+    display: inline-block;
+    background: white;
+    padding: 0;
+    border-radius: 0;
+}
+
+.keypad-panel {
+    background: #e8d7c3;
+    border-radius: 16px;
+    padding: 20px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    width: fit-content;
+    min-width: 280px;
+}
+
+.keypad-section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.keypad-row {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 10px;
+}
+
+.keypad-row.bottom {
+    grid-template-columns: repeat(3, 1fr);
+}
+
+.grid {
+    display: grid;
+    grid-template-columns: repeat(9, 50px);
+    gap: 0;
+    background: white;
+    padding: 0;
+    border: 3px solid #333;
+}
+
+.cell {
+    width: 50px;
+    height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #999;
+    font-size: 18px;
+    font-weight: bold;
+    cursor: pointer;
+    background: white;
+    transition: all 0.1s ease;
+    color: #333;
+}
+
+.cell:hover:not(.given) {
+    background: #f0f0f0;
+}
+
+.cell.given {
+    background: #f5f5f5;
+    color: #000;
+    cursor: default;
+    font-weight: 900;
+}
+
+.cell.selected {
+    background: #667eea;
+    color: white;
+}
+
+.cell.related {
+    background: #e8eaf6;
+}
+
+.cell.error {
+    background: #ffebee;
+    color: #c62828;
+}
+
+.cell.hint {
+    background: #fffde7;
+}
+
+.cell.conflict {
+    background: #ffcccc;
+}
+
+.cell:nth-child(3n) {
+    border-right: 3px solid #333;
+}
+
+.cell:nth-child(9n) {
+    border-right: 1px solid #999;
+}
+
+.cell:nth-child(n + 19):nth-child(-n + 27),
+.cell:nth-child(n + 46):nth-child(-n + 54) {
+    border-bottom: 3px solid #333;
+}
+
+.cell:nth-child(n + 1):nth-child(-n + 9) {
+    border-top: 1px solid #999;
+}
+
+.cell:nth-child(9n + 1) {
+    border-left: 1px solid #999;
+}
+
+#delete-btn {
+    grid-column: 1 / -1;
+    background: #9c27b0 !important;
+    color: white !important;
+    border-color: #9c27b0 !important;
+    padding: 14px !important;
+    height: auto !important;
+    width: auto !important;
+    font-weight: bold !important;
+    font-size: 16px !important;
+    border-radius: 12px !important;
+    box-shadow: 0 4px 12px rgba(156, 39, 176, 0.3);
+}
+
+#delete-btn:hover {
+    background: #8b1fa0 !important;
+    box-shadow: 0 6px 16px rgba(156, 39, 176, 0.5);
+}
+
+.num-btn {
+    width: 100%;
+    height: 60px;
+    padding: 0;
+    font-size: 22px;
+    border: none;
+    background: white;
+    border-radius: 14px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: all 0.2s ease;
+    color: #333;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.num-btn:hover {
+    background: #f5f5f5;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.2);
+}
+
+.num-btn.selected {
+    background: #667eea;
+    color: white;
+    box-shadow: 0 6px 16px rgba(102, 126, 234, 0.4);
+}
+
+.num-btn:active {
+    transform: scale(0.95);
+}
+
+.keypad-actions {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+}
+
+#new-game-btn {
+    background: #667eea !important;
+    color: white !important;
+}
+
+#new-game-btn:hover {
+    background: #5568d3 !important;
+}
+
+#clear-btn {
+    background: #ff6b6b !important;
+    color: white !important;
+}
+
+#clear-btn:hover {
+    background: #ee5a52 !important;
+}
+
+#hint-btn-mobile {
+    background: #f093fb !important;
+    color: white !important;
+}
+
+#hint-btn-mobile:hover {
+    background: #e074db !important;
+}
+
+.completion-modal {
+    display: none;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: white;
+    border-radius: 12px;
+    padding: 30px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    z-index: 300;
+    max-height: 80vh;
+    overflow-y: auto;
+    max-width: 500px;
+    width: 90%;
+}
+
+.completion-modal.active {
+    display: block;
+}
+
+.completion-modal h2 {
+    text-align: center;
+    color: #2e7d32;
+    font-size: 24px;
+    margin-bottom: 15px;
+}
+
+.completion-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.6);
+    z-index: 299;
+}
+
+.completion-overlay.active {
+    display: block;
+}
+
+.difficulty-modal.active {
+    display: block;
+}
+
+.difficulty-modal {
+    display: none;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: white;
+    border-radius: 12px;
+    padding: 30px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    z-index: 299;
+    max-height: 80vh;
+    overflow-y: auto;
+    max-width: 500px;
+    width: 90%;
+}
+
+.difficulty-modal h2 {
+    text-align: center;
+    margin-bottom: 20px;
+    color: #333;
+}
+
+.difficulty-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+}
+
+.difficulty-btn {
+    padding: 15px;
+    border: 2px solid #ddd;
+    background: #f8f9fa;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 14px;
+    transition: all 0.2s ease;
+    color: #333;
+}
+
+.difficulty-btn:hover {
+    background: #e8eaf6;
+    border-color: #667eea;
+}
+
+.difficulty-btn.selected {
+    background: #667eea;
+    color: white;
+    border-color: #667eea;
+}
+
+.difficulty-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.5);
+    z-index: 198;
+}
+
+.difficulty-overlay.active {
+    display: block;
+}
+
+.message.success {
+    background: #c8e6c9;
+    color: #2e7d32;
+    display: block;
+    padding: 15px;
+    margin-top: 20px;
+    height: auto;
+}
+
+.message.error {
+    background: #ffcdd2;
+    color: #c62828;
+    display: block;
+    padding: 15px;
+    margin-top: 20px;
+    height: auto;
+}
+
+@media (max-width: 480px) {
+    .cell {
+        width: 40px;
+        height: 40px;
+        font-size: 14px;
+    }
+    
+    .controls {
+        gap: 5px;
+    }
+    
+    button {
+        padding: 8px 12px;
+        font-size: 12px;
+    }
+    
+    .container {
+        padding: 15px;
+    }
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h1>SUDOKU</h1>
+        <div class="stats">
+            <div class="stat-item">
+                <div class="stat-label">Difficulty</div>
+                <div class="stat-value" id="difficulty" style="cursor: pointer;">5</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Time</div>
+                <div class="stat-value" id="time">0:00</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="game-wrapper">
+        <div class="grid-container">
+            <div class="grid" id="grid"></div>
+        </div>
+
+        <div class="keypad-panel">
+            <div class="keypad-section">
+                <div class="keypad-row">
+                    <button class="num-btn" data-num="1">1</button>
+                    <button class="num-btn" data-num="2">2</button>
+                    <button class="num-btn" data-num="3">3</button>
+                    <button class="num-btn" data-num="4">4</button>
+                    <button class="num-btn" data-num="5">5</button>
+                    <button class="num-btn" data-num="6">6</button>
+                </div>
+                
+                <div class="keypad-row bottom">
+                    <button class="num-btn" data-num="7">7</button>
+                    <button class="num-btn" data-num="8">8</button>
+                    <button class="num-btn" data-num="9">9</button>
+                </div>
+            </div>
+            
+            <div class="keypad-actions">
+                <button class="num-btn" id="new-game-btn">NEW</button>
+                <button class="num-btn" id="clear-btn">CLR</button>
+                <button class="num-btn" id="hint-btn-mobile">HNT</button>
+            </div>
+            
+            <button class="num-btn" id="delete-btn">DELETE</button>
+        </div>
+    </div>
+
+    <div class="message" id="message"></div>
+
+    <div class="completion-overlay" id="completion-overlay"></div>
+    <div class="completion-modal" id="completion-modal">
+        <h2 id="completion-title">🎉 Puzzle Solved!</h2>
+        <div id="completion-content"></div>
+    </div>
+
+    <div class="difficulty-overlay" id="difficulty-overlay"></div>
+    <div class="difficulty-modal" id="difficulty-modal">
+        <div class="difficulty-grid" id="difficulty-grid"></div>
+    </div>
+</div>
+
+<script>
+class Sudoku {
+    constructor() {
+        this.grid = Array(9).fill(null).map(() => Array(9).fill(0));
+        this.solution = Array(9).fill(null).map(() => Array(9).fill(0));
+        this.original = Array(9).fill(null).map(() => Array(9).fill(0));
+        this.selected = null;
+        this.selectedNum = null;
+        this.deleteMode = false;
+        this.difficultyLevel = 5;
+        this.emptyCells = 0;
+        this.startTime = null;
+        this.timerInterval = null;
+        this.hintedCell = null;
+        this.hintsUsed = 0;
+        this.topScores = this.loadTopScores();
+        this.init();
+    }
+
+    init() {
+        this.generatePuzzle();
+        this.render();
+        this.attachEventListeners();
+        this.startTimer();
+    }
+
+    loadTopScores() {
+        const saved = localStorage.getItem('sudokuTopScores');
+        return saved ? JSON.parse(saved) : [];
+    }
+
+    saveTopScores() {
+        localStorage.setItem('sudokuTopScores', JSON.stringify(this.topScores));
+    }
+
+    addScore(time, hintsUsed, level) {
+        const score = { time, hintsUsed, level, date: new Date().toLocaleDateString() };
+        this.topScores.push(score);
+        this.topScores.sort((a, b) => a.time - b.time);
+        this.topScores = this.topScores.slice(0, 10);
+        this.saveTopScores();
+        return this.topScores.findIndex(s => s === score) + 1 <= 10;
+    }
+
+    generatePuzzle() {
+        // Generate complete sudoku solution
+        this.solution = this.generateSolution();
+        
+        // Copy to grid
+        for (let i = 0; i < 9; i++) {
+            for (let j = 0; j < 9; j++) {
+                this.grid[i][j] = this.solution[i][j];
+                this.original[i][j] = this.solution[i][j];
+            }
+        }
+
+        // Remove numbers based on difficulty (1-10)
+        // Level 1: 20 removed (61 shown) - Very Easy
+        // Level 5: 54 removed (27 shown) - Hard
+        // Level 10: 60 removed (21 shown) - Very Hard
+        const toRemove = 20 + (this.difficultyLevel - 1) * 5;
+        let removed = 0;
+        
+        while (removed < toRemove) {
+            const row = Math.floor(Math.random() * 9);
+            const col = Math.floor(Math.random() * 9);
+            
+            if (this.grid[row][col] !== 0) {
+                this.grid[row][col] = 0;
+                this.original[row][col] = 0;
+                removed++;
+            }
+        }
+        
+        this.emptyCells = Math.round(toRemove);
+    }
+
+    generateSolution() {
+        const grid = Array(9).fill(null).map(() => Array(9).fill(0));
+        this.fillGrid(grid);
+        return grid;
+    }
+
+    fillGrid(grid) {
+        for (let row = 0; row < 9; row++) {
+            for (let col = 0; col < 9; col++) {
+                if (grid[row][col] === 0) {
+                    const nums = this.shuffle([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+                    
+                    for (let num of nums) {
+                        if (this.isValid(grid, row, col, num)) {
+                            grid[row][col] = num;
+                            
+                            if (this.fillGrid(grid)) {
+                                return true;
+                            }
+                            
+                            grid[row][col] = 0;
+                        }
+                    }
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    isValid(grid, row, col, num) {
+        // Check row
+        for (let x = 0; x < 9; x++) {
+            if (grid[row][x] === num) return false;
+        }
+
+        // Check column
+        for (let x = 0; x < 9; x++) {
+            if (grid[x][col] === num) return false;
+        }
+
+        // Check 3x3 box
+        const boxRow = Math.floor(row / 3) * 3;
+        const boxCol = Math.floor(col / 3) * 3;
+        for (let i = boxRow; i < boxRow + 3; i++) {
+            for (let j = boxCol; j < boxCol + 3; j++) {
+                if (grid[i][j] === num) return false;
+            }
+        }
+
+        return true;
+    }
+
+    shuffle(arr) {
+        const result = [...arr];
+        for (let i = result.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [result[i], result[j]] = [result[j], result[i]];
+        }
+        return result;
+    }
+
+    render() {
+        const gridEl = document.getElementById('grid');
+        gridEl.innerHTML = '';
+
+        for (let i = 0; i < 9; i++) {
+            for (let j = 0; j < 9; j++) {
+                const cell = document.createElement('div');
+                cell.className = 'cell';
+                cell.dataset.row = i;
+                cell.dataset.col = j;
+
+                if (this.original[i][j] !== 0) {
+                    cell.classList.add('given');
+                    cell.textContent = this.original[i][j];
+                } else {
+                    if (this.grid[i][j] !== 0) {
+                        cell.textContent = this.grid[i][j];
+                    }
+                    cell.addEventListener('click', () => this.selectCell(i, j));
+                }
+
+                gridEl.appendChild(cell);
+            }
+        }
+
+        this.updateStats();
+        
+        // Check for completion after render
+        setTimeout(() => {
+            if (this.isComplete() && this.isSolved()) {
+                this.stopTimer();
+                const elapsed = Math.floor((Date.now() - this.startTime) / 1000);
+                const isTopScore = this.addScore(elapsed, this.hintsUsed, this.difficultyLevel);
+                const minutes = Math.floor(elapsed / 60);
+                const seconds = elapsed % 60;
+                const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                
+                let msg = `🎉 Solved! ${timeStr} | Hints: ${this.hintsUsed}`;
+                if (isTopScore) {
+                    msg += ' 🏆 TOP 10!';
+                }
+                this.showCompletionModal(msg);
+                this.showTopScores();
+            }
+        }, 0);
+    }
+
+    selectCell(row, col) {
+        if (this.original[row][col] !== 0) return;
+
+        // If delete mode is on, clear the cell
+        if (this.deleteMode) {
+            if (this.grid[row][col] !== 0) {
+                this.grid[row][col] = 0;
+                this.render();
+            }
+            this.selectCell(row, col);
+            return;
+        }
+
+        // If this is a hinted cell, accept it and set as selected number
+        if (this.hintedCell && this.hintedCell.row === row && this.hintedCell.col === col) {
+            this.selectedNum = this.grid[row][col];
+            this.hintedCell = null;
+            this.updateNumBtnSelection();
+            // Don't render or recurse, just continue with normal selection below
+        } else {
+            // Toggle: if cell has selected number, clear it; otherwise place number
+            if (this.selectedNum) {
+                if (this.grid[row][col] === this.selectedNum) {
+                    // Clear the cell
+                    this.grid[row][col] = 0;
+                } else {
+                    // Place the number
+                    this.grid[row][col] = this.selectedNum;
+                }
+                this.render();
+            }
+        }
+
+        // Clear previous selection and related cells
+        document.querySelectorAll('.cell').forEach(c => {
+            c.classList.remove('selected', 'related', 'conflict');
+            c.style.background = '';
+            c.style.color = '';
+            c.style.fontWeight = '';
+        });
+
+        this.selected = { row, col };
+        const cell = document.querySelector(`[data-row="${row}"][data-col="${col}"]`);
+        cell.classList.add('selected');
+        
+        // Update selected number if cell has a value
+        if (this.grid[row][col] !== 0) {
+            this.selectedNum = this.grid[row][col];
+            this.updateNumBtnSelection();
+        }
+
+        // Validate if cell has content
+        if (this.grid[row][col] !== 0) {
+            this.validateCell(row, col);
+        }
+
+        // Highlight related cells (same row, column, box)
+        for (let i = 0; i < 9; i++) {
+            if (i !== row) {
+                document.querySelector(`[data-row="${i}"][data-col="${col}"]`)?.classList.add('related');
+            }
+            if (i !== col) {
+                document.querySelector(`[data-row="${row}"][data-col="${i}"]`)?.classList.add('related');
+            }
+        }
+
+        const boxRow = Math.floor(row / 3) * 3;
+        const boxCol = Math.floor(col / 3) * 3;
+        for (let i = boxRow; i < boxRow + 3; i++) {
+            for (let j = boxCol; j < boxCol + 3; j++) {
+                if (!(i === row && j === col)) {
+                    document.querySelector(`[data-row="${i}"][data-col="${j}"]`)?.classList.add('related');
+                }
+            }
+        }
+
+        if (this.isComplete() && this.isSolved()) {
+            this.stopTimer();
+            const elapsed = Math.floor((Date.now() - this.startTime) / 1000);
+            const isTopScore = this.addScore(elapsed, this.hintsUsed, this.difficultyLevel);
+            const minutes = Math.floor(elapsed / 60);
+            const seconds = elapsed % 60;
+            const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            
+            let msg = `🎉 Solved! ${timeStr} | Hints: ${this.hintsUsed}`;
+            if (isTopScore) {
+                msg += ' 🏆 TOP 10!';
+            }
+            this.showCompletionModal(msg);
+            this.showTopScores();
+        }
+    }
+
+    placeNumber(num) {
+        if (!this.selected) return;
+
+        const { row, col } = this.selected;
+        if (this.original[row][col] !== 0) return;
+
+        this.grid[row][col] = num;
+        this.selectedNum = num;
+        this.updateNumBtnSelection();
+        this.render();
+        this.selectCell(row, col);
+        this.validateCell(row, col);
+        
+        if (this.isComplete() && this.isSolved()) {
+            this.showMessage('🎉 Puzzle Solved! Congratulations!', 'success');
+            this.stopTimer();
+        }
+    }
+
+    deleteNumber() {
+        if (!this.selected) return;
+
+        const { row, col } = this.selected;
+        if (this.original[row][col] !== 0) return;
+
+        this.grid[row][col] = 0;
+        this.selectedNum = null;
+        this.updateNumBtnSelection();
+        this.render();
+        this.selectCell(row, col);
+    }
+
+    validateCell(row, col) {
+        const num = this.grid[row][col];
+        const cell = document.querySelector(`[data-row="${row}"][data-col="${col}"]`);
+        if (!cell) return;
+        
+        cell.classList.remove('error');
+
+        // Check row
+        for (let j = 0; j < 9; j++) {
+            if (j !== col && this.grid[row][j] === num) {
+                cell.classList.add('error');
+                return;
+            }
+        }
+
+        // Check column
+        for (let i = 0; i < 9; i++) {
+            if (i !== row && this.grid[i][col] === num) {
+                cell.classList.add('error');
+                return;
+            }
+        }
+
+        // Check 3x3 box
+        const boxRow = Math.floor(row / 3) * 3;
+        const boxCol = Math.floor(col / 3) * 3;
+        for (let i = boxRow; i < boxRow + 3; i++) {
+            for (let j = boxCol; j < boxCol + 3; j++) {
+                if ((i !== row || j !== col) && this.grid[i][j] === num) {
+                    cell.classList.add('error');
+                    return;
+                }
+            }
+        }
+    }
+
+    updateNumBtnSelection() {
+        document.querySelectorAll('.num-btn[data-num]').forEach(btn => {
+            btn.classList.remove('selected');
+            if (this.selectedNum && btn.dataset.num == this.selectedNum) {
+                btn.classList.add('selected');
+            }
+        });
+    }
+
+    isComplete() {
+        for (let i = 0; i < 9; i++) {
+            for (let j = 0; j < 9; j++) {
+                if (this.grid[i][j] === 0) return false;
+            }
+        }
+        return true;
+    }
+
+    isSolved() {
+        for (let i = 0; i < 9; i++) {
+            for (let j = 0; j < 9; j++) {
+                if (this.grid[i][j] !== this.solution[i][j]) return false;
+            }
+        }
+        return true;
+    }
+
+    check() {
+        let hasError = false;
+        document.querySelectorAll('.cell').forEach(cell => {
+            cell.classList.remove('error', 'conflict');
+        });
+
+        for (let i = 0; i < 9; i++) {
+            for (let j = 0; j < 9; j++) {
+                if (this.grid[i][j] === 0) continue;
+
+                // Check for duplicates in row
+                for (let k = 0; k < 9; k++) {
+                    if (k !== j && this.grid[i][k] === this.grid[i][j]) {
+                        document.querySelector(`[data-row="${i}"][data-col="${j}"]`)?.classList.add('error');
+                        document.querySelector(`[data-row="${i}"][data-col="${k}"]`)?.classList.add('error');
+                        hasError = true;
+                    }
+                }
+
+                // Check for duplicates in column
+                for (let k = 0; k < 9; k++) {
+                    if (k !== i && this.grid[k][j] === this.grid[i][j]) {
+                        document.querySelector(`[data-row="${i}"][data-col="${j}"]`)?.classList.add('error');
+                        document.querySelector(`[data-row="${k}"][data-col="${j}"]`)?.classList.add('error');
+                        hasError = true;
+                    }
+                }
+
+                // Check for duplicates in 3x3 box
+                const boxRow = Math.floor(i / 3) * 3;
+                const boxCol = Math.floor(j / 3) * 3;
+                for (let x = boxRow; x < boxRow + 3; x++) {
+                    for (let y = boxCol; y < boxCol + 3; y++) {
+                        if ((x !== i || y !== j) && this.grid[x][y] === this.grid[i][j]) {
+                            document.querySelector(`[data-row="${i}"][data-col="${j}"]`)?.classList.add('error');
+                            document.querySelector(`[data-row="${x}"][data-col="${y}"]`)?.classList.add('error');
+                            hasError = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (hasError) {
+            this.showMessage('❌ Some numbers conflict!', 'error');
+        } else {
+            this.showMessage('✓ No conflicts found!', 'success');
+        }
+    }
+
+    hint() {
+        // Collect all empty cells
+        const emptyCells = [];
+        for (let i = 0; i < 9; i++) {
+            for (let j = 0; j < 9; j++) {
+                if (this.grid[i][j] === 0 && this.original[i][j] === 0) {
+                    emptyCells.push({ row: i, col: j });
+                }
+            }
+        }
+        
+        if (emptyCells.length === 0) {
+            return;
+        }
+        
+        // Pick random empty cell
+        const randomCell = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+        this.grid[randomCell.row][randomCell.col] = this.solution[randomCell.row][randomCell.col];
+        this.hintsUsed++;
+        this.hintedCell = { row: randomCell.row, col: randomCell.col };
+        this.render();
+        
+        // Highlight the hinted cell with inverted colors
+        const hintedCell = document.querySelector(`[data-row="${randomCell.row}"][data-col="${randomCell.col}"]`);
+        if (hintedCell) {
+            hintedCell.style.background = '#333';
+            hintedCell.style.color = '#fff';
+            hintedCell.style.fontWeight = 'bold';
+        }
+    }
+
+    clear() {
+        for (let i = 0; i < 9; i++) {
+            for (let j = 0; j < 9; j++) {
+                if (this.original[i][j] === 0) {
+                    this.grid[i][j] = 0;
+                }
+            }
+        }
+        this.selected = null;
+        this.render();
+    }
+
+    newGame() {
+        this.generatePuzzle();
+        this.selected = null;
+        this.selectedNum = null;
+        this.deleteMode = false;
+        this.hintedCell = null;
+        this.hintsUsed = 0;
+        this.startTime = null;
+        this.stopTimer();
+        document.getElementById('delete-btn').classList.remove('active');
+        this.render();
+        this.updateNumBtnSelection();
+        this.startTimer();
+    }
+
+    startTimer() {
+        this.startTime = Date.now();
+        this.timerInterval = setInterval(() => {
+            const elapsed = Math.floor((Date.now() - this.startTime) / 1000);
+            const minutes = Math.floor(elapsed / 60);
+            const seconds = elapsed % 60;
+            document.getElementById('time').textContent = 
+                `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }, 1000);
+    }
+
+    stopTimer() {
+        clearInterval(this.timerInterval);
+    }
+
+    updateStats() {
+        document.getElementById('difficulty').textContent = this.difficultyLevel;
+    }
+
+    showMessage(text, type) {
+        const msg = document.getElementById('message');
+        msg.textContent = text;
+        msg.className = `message ${type}`;
+        setTimeout(() => {
+            msg.className = 'message';
+        }, 3000);
+    }
+
+    attachEventListeners() {
+        const newGameBtn = document.getElementById('new-game-btn');
+        const hintBtn = document.getElementById('hint-btn-mobile');
+        const clearBtn = document.getElementById('clear-btn');
+        const deleteBtn = document.getElementById('delete-btn');
+        
+        if (!newGameBtn || !deleteBtn) {
+            console.error('Keypad buttons not found');
+            return;
+        }
+        
+        newGameBtn.addEventListener('click', () => this.newGame());
+        hintBtn.addEventListener('click', () => this.hint());
+        const checkBtn = document.getElementById('check-btn');
+        if (checkBtn) checkBtn.addEventListener('click', () => this.check());
+        clearBtn.addEventListener('click', () => this.clear());
+        
+        deleteBtn.addEventListener('click', () => {
+            this.deleteMode = !this.deleteMode;
+            const btn = document.getElementById('delete-btn');
+            if (this.deleteMode) {
+                btn.classList.add('active');
+                this.selectedNum = null;
+                this.updateNumBtnSelection();
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+        
+        // Difficulty selector
+        document.getElementById('difficulty').addEventListener('click', () => this.showDifficultyModal());
+        document.getElementById('difficulty-overlay').addEventListener('click', () => this.closeDifficultyModal());
+        
+        // Completion modal
+        document.getElementById('completion-overlay').addEventListener('click', () => this.closeCompletionModal());
+
+        const numButtons = document.querySelectorAll('.num-btn[data-num]');
+        console.log('Found', numButtons.length, 'number buttons');
+        
+        numButtons.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                const num = parseInt(e.target.dataset.num);
+                this.deleteMode = false;
+                document.getElementById('delete-btn').classList.remove('active');
+                this.selectedNum = (this.selectedNum === num) ? null : num;
+                this.updateNumBtnSelection();
+            });
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key >= '1' && e.key <= '9') {
+                const num = parseInt(e.key);
+                this.deleteMode = false;
+                document.getElementById('delete-btn').classList.remove('active');
+                this.selectedNum = (this.selectedNum === num) ? null : num;
+                this.updateNumBtnSelection();
+            } else if (e.key === 'Backspace' || e.key === 'Delete') {
+                e.preventDefault();
+                this.deleteMode = !this.deleteMode;
+                document.getElementById('delete-btn').classList.toggle('active', this.deleteMode);
+            }
+        });
+    }
+
+    showDifficultyModal() {
+        const grid = document.getElementById('difficulty-grid');
+        grid.innerHTML = '';
+        
+        for (let i = 1; i <= 10; i++) {
+            const btn = document.createElement('button');
+            btn.className = 'difficulty-btn';
+            btn.textContent = `Level ${i}`;
+            if (i === this.difficultyLevel) {
+                btn.classList.add('selected');
+            }
+            btn.addEventListener('click', () => {
+                this.difficultyLevel = i;
+                this.newGame();
+                this.closeDifficultyModal();
+            });
+            grid.appendChild(btn);
+        }
+        
+        document.getElementById('difficulty-modal').classList.add('active');
+        document.getElementById('difficulty-overlay').classList.add('active');
+    }
+
+    closeDifficultyModal() {
+        document.getElementById('difficulty-modal').classList.remove('active');
+        document.getElementById('difficulty-overlay').classList.remove('active');
+    }
+
+    showTopScores() {
+        if (this.topScores.length === 0) return;
+        
+        let scoresHTML = '<h3 style="text-align: center; margin: 20px 0 15px 0; font-size: 18px;">🏆 TOP 10 SCORES</h3>';
+        scoresHTML += '<table style="width: 100%; font-size: 13px; border-collapse: collapse;">';
+        scoresHTML += '<tr style="background: #f0f0f0;"><th style="padding: 8px; border: 1px solid #ddd;">Rank</th><th style="padding: 8px; border: 1px solid #ddd;">Time</th><th style="padding: 8px; border: 1px solid #ddd;">Hints</th><th style="padding: 8px; border: 1px solid #ddd;">Level</th></tr>';
+        
+        this.topScores.forEach((score, idx) => {
+            const mins = Math.floor(score.time / 60);
+            const secs = score.time % 60;
+            const timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+            scoresHTML += `<tr style="background: ${idx % 2 === 0 ? '#fff' : '#f9f9f9'};"><td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${idx + 1}</td><td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${timeStr}</td><td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${score.hintsUsed}</td><td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${score.level}</td></tr>`;
+        });
+        
+        scoresHTML += '</table>';
+        
+        document.getElementById('completion-content').innerHTML = scoresHTML;
+    }
+
+    showCompletionModal(msg) {
+        document.getElementById('completion-title').textContent = msg;
+        document.getElementById('completion-modal').classList.add('active');
+        document.getElementById('completion-overlay').classList.add('active');
+    }
+
+    closeCompletionModal() {
+        document.getElementById('completion-modal').classList.remove('active');
+        document.getElementById('completion-overlay').classList.remove('active');
+    }
+}
+
+const game = new Sudoku();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Battlezone</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #000; overflow: hidden; }
+canvas { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<script>
+// ============================================================
+// BATTLEZONE - Wireframe 3D Tank Game
+// ============================================================
+
+var cv = document.getElementById('cv');
+var gl = cv.getContext('2d');
+var W, H;
+
+function resize() {
+    W = cv.width = window.innerWidth;
+    H = cv.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ============================================================
+// CONSTANTS
+// ============================================================
+var FOV = 60 * Math.PI / 180;
+var NEAR = 5;
+var FAR = 1200;
+var GROUND_Y = 0; // ground plane at y=0 in world (we use xz as ground plane)
+
+// ============================================================
+// PLAYER STATE
+// ============================================================
+var cam = { x: 0, z: 0, rot: 0 }; // position on xz plane, rotation around y
+var camY = 10; // camera height above ground
+var speed = 0;
+var turnRate = 0;
+var alive = true;
+var score = 0;
+var kills = 0;
+var lives = 3;
+var level = 1;
+var shellInFlight = null; // only one shell at a time like original
+var shellSpeed = 12;
+var bangTimer = 0; // shows BANG! on screen when firing
+
+// ============================================================
+// INPUT
+// ============================================================
+var input = { fwd: false, back: false, left: false, right: false, fire: false };
+
+document.addEventListener('keydown', function(e) {
+    switch(e.code) {
+        case 'KeyW': case 'ArrowUp': input.fwd = true; break;
+        case 'KeyS': case 'ArrowDown': input.back = true; break;
+        case 'KeyA': case 'ArrowLeft': input.left = true; break;
+        case 'KeyD': case 'ArrowRight': input.right = true; break;
+        case 'Space': e.preventDefault(); input.fire = true; break;
+    }
+});
+
+document.addEventListener('keyup', function(e) {
+    switch(e.code) {
+        case 'KeyW': case 'ArrowUp': input.fwd = false; break;
+        case 'KeyS': case 'ArrowDown': input.back = false; break;
+        case 'KeyA': case 'ArrowLeft': input.left = false; break;
+        case 'KeyD': case 'ArrowRight': input.right = false; break;
+        case 'Space': input.fire = false; break;
+    }
+});
+
+// ============================================================
+// 3D PROJECTION
+// ============================================================
+// World uses: X = left/right, Y = up, Z = forward/back
+// Camera looks along its local Z axis (into the screen)
+
+function projectPoint(wx, wy, wz) {
+    // Translate to camera space
+    var dx = wx - cam.x;
+    var dz = wz - cam.z;
+    var dy = wy - camY;
+    
+    // Rotate around Y axis by cam.rot
+    var cos = Math.cos(cam.rot);
+    var sin = Math.sin(cam.rot);
+    var cx = dx * cos + dz * sin;   // camera-space x (right)
+    var cz = -dx * sin + dz * cos;  // camera-space z (forward into screen)
+    var cy = dy;                      // camera-space y (up)
+    
+    // Behind camera
+    if (cz < NEAR) return null;
+    if (cz > FAR) return null;
+    
+    // Perspective divide
+    var f = (W * 0.5) / Math.tan(FOV / 2);
+    var sx = W / 2 + (cx / cz) * f;
+    var sy = H / 2 - (cy / cz) * f;
+    
+    return { x: sx, y: sy, z: cz };
+}
+
+// Clip and draw a 3D line segment
+function drawLine3D(x1, y1, z1, x2, y2, z2) {
+    // Compute camera-space Z for each point
+    var cos = Math.cos(cam.rot);
+    var sin = Math.sin(cam.rot);
+    var p1z = -(x1 - cam.x) * sin + (z1 - cam.z) * cos;
+    var p2z = -(x2 - cam.x) * sin + (z2 - cam.z) * cos;
+    
+    if (p1z < NEAR && p2z < NEAR) return;
+    
+    // If one point is behind, clip
+    if (p1z < NEAR || p2z < NEAR) {
+        var t = (NEAR - p1z) / (p2z - p1z);
+        if (p1z < NEAR) {
+            x1 = x1 + (x2 - x1) * t;
+            y1 = y1 + (y2 - y1) * t;
+            z1 = z1 + (z2 - z1) * t;
+        } else {
+            t = (NEAR - p2z) / (p1z - p2z);
+            x2 = x2 + (x1 - x2) * t;
+            y2 = y2 + (y1 - y2) * t;
+            z2 = z2 + (z1 - z2) * t;
+        }
+    }
+    
+    var a = projectPoint(x1, y1, z1);
+    var b = projectPoint(x2, y2, z2);
+    if (!a || !b) return;
+    
+    gl.beginPath();
+    gl.moveTo(a.x, a.y);
+    gl.lineTo(b.x, b.y);
+    gl.stroke();
+}
+
+// ============================================================
+// WORLD OBJECTS
+// ============================================================
+var obstacles = [];
+var enemies = [];
+var explosions = [];
+var enemyShells = [];
+var spawnTimer = 0;
+
+function generateWorld() {
+    obstacles = [];
+    // Scatter pyramids and cubes
+    for (var i = 0; i < 20; i++) {
+        var ox = (Math.random() - 0.5) * 2000;
+        var oz = (Math.random() - 0.5) * 2000;
+        if (Math.abs(ox) < 60 && Math.abs(oz) < 60) continue;
+        obstacles.push({
+            x: ox, z: oz,
+            size: 15 + Math.random() * 15,
+            type: Math.random() < 0.6 ? 'pyramid' : 'cube'
+        });
+    }
+}
+
+function spawnEnemy() {
+    var angle = Math.random() * Math.PI * 2;
+    var dist = 400 + Math.random() * 300;
+    enemies.push({
+        x: cam.x + Math.cos(angle) * dist,
+        z: cam.z + Math.sin(angle) * dist,
+        rot: Math.random() * Math.PI * 2,
+        speed: 1.2 + level * 0.3,
+        hp: 1,
+        fireTimer: 100 + Math.floor(Math.random() * 100),
+        state: 'approach' // approach, strafe
+    });
+}
+
+// ============================================================
+// DRAWING FUNCTIONS
+// ============================================================
+
+function drawGroundGrid() {
+    gl.strokeStyle = '#050';
+    gl.lineWidth = 1;
+    
+    var gridSpace = 100;
+    var extent = 800;
+    var baseX = Math.round(cam.x / gridSpace) * gridSpace;
+    var baseZ = Math.round(cam.z / gridSpace) * gridSpace;
+    
+    for (var i = -extent; i <= extent; i += gridSpace) {
+        drawLine3D(baseX + i, 0, baseZ - extent, baseX + i, 0, baseZ + extent);
+        drawLine3D(baseX - extent, 0, baseZ + i, baseX + extent, 0, baseZ + i);
+    }
+}
+
+function drawMountainRange() {
+    gl.strokeStyle = '#0a0';
+    gl.lineWidth = 2;
+    
+    var dist = 900;
+    var segments = 60;
+    
+    gl.beginPath();
+    var started = false;
+    for (var i = 0; i <= segments; i++) {
+        var angle = (i / segments) * Math.PI * 2;
+        var wx = cam.x + Math.cos(angle) * dist;
+        var wz = cam.z + Math.sin(angle) * dist;
+        // Deterministic height based on angle
+        var seed = Math.floor(angle * 20);
+        var mh = 30 + Math.abs(Math.sin(seed * 3.7) * 60) + Math.abs(Math.cos(seed * 2.3) * 30);
+        
+        var p = projectPoint(wx, mh, wz);
+        if (p) {
+            if (!started) { gl.moveTo(p.x, p.y); started = true; }
+            else gl.lineTo(p.x, p.y);
+        } else {
+            started = false;
+        }
+    }
+    gl.stroke();
+}
+
+function drawObstacle(ob) {
+    var s = ob.size;
+    var x = ob.x, z = ob.z;
+    
+    gl.strokeStyle = '#0f0';
+    gl.lineWidth = 1.5;
+    
+    if (ob.type === 'pyramid') {
+        var apex = s * 2;
+        // Base
+        drawLine3D(x-s, 0, z-s, x+s, 0, z-s);
+        drawLine3D(x+s, 0, z-s, x+s, 0, z+s);
+        drawLine3D(x+s, 0, z+s, x-s, 0, z+s);
+        drawLine3D(x-s, 0, z+s, x-s, 0, z-s);
+        // To apex
+        drawLine3D(x-s, 0, z-s, x, apex, z);
+        drawLine3D(x+s, 0, z-s, x, apex, z);
+        drawLine3D(x+s, 0, z+s, x, apex, z);
+        drawLine3D(x-s, 0, z+s, x, apex, z);
+    } else {
+        var h = s * 1.5;
+        // Bottom
+        drawLine3D(x-s, 0, z-s, x+s, 0, z-s);
+        drawLine3D(x+s, 0, z-s, x+s, 0, z+s);
+        drawLine3D(x+s, 0, z+s, x-s, 0, z+s);
+        drawLine3D(x-s, 0, z+s, x-s, 0, z-s);
+        // Top
+        drawLine3D(x-s, h, z-s, x+s, h, z-s);
+        drawLine3D(x+s, h, z-s, x+s, h, z+s);
+        drawLine3D(x+s, h, z+s, x-s, h, z+s);
+        drawLine3D(x-s, h, z+s, x-s, h, z-s);
+        // Verticals
+        drawLine3D(x-s, 0, z-s, x-s, h, z-s);
+        drawLine3D(x+s, 0, z-s, x+s, h, z-s);
+        drawLine3D(x+s, 0, z+s, x+s, h, z+s);
+        drawLine3D(x-s, 0, z+s, x-s, h, z+s);
+    }
+}
+
+function drawEnemyTank(e) {
+    var x = e.x, z = e.z, rot = e.rot;
+    var cos = Math.cos(rot), sin = Math.sin(rot);
+    var bw = 10, bl = 14, bh = 6; // body width, length, height
+    
+    gl.strokeStyle = '#f00';
+    gl.lineWidth = 2;
+    
+    // Body corners (on ground)
+    var corners = [
+        { x: x + cos*bl - sin*bw, z: z + sin*bl + cos*bw },
+        { x: x + cos*bl + sin*bw, z: z + sin*bl - cos*bw },
+        { x: x - cos*bl + sin*bw, z: z - sin*bl - cos*bw },
+        { x: x - cos*bl - sin*bw, z: z - sin*bl + cos*bw }
+    ];
+    
+    // Bottom edges
+    for (var i = 0; i < 4; i++) {
+        var n = (i+1)%4;
+        drawLine3D(corners[i].x, 2, corners[i].z, corners[n].x, 2, corners[n].z);
+    }
+    // Top edges
+    for (var i = 0; i < 4; i++) {
+        var n = (i+1)%4;
+        drawLine3D(corners[i].x, bh+2, corners[i].z, corners[n].x, bh+2, corners[n].z);
+    }
+    // Verticals
+    for (var i = 0; i < 4; i++) {
+        drawLine3D(corners[i].x, 2, corners[i].z, corners[i].x, bh+2, corners[i].z);
+    }
+    
+    // Turret (small box on top)
+    var tw = 5, tl = 6, th = 4;
+    var tc = [
+        { x: x + cos*tl - sin*tw, z: z + sin*tl + cos*tw },
+        { x: x + cos*tl + sin*tw, z: z + sin*tl - cos*tw },
+        { x: x - cos*tl + sin*tw, z: z - sin*tl - cos*tw },
+        { x: x - cos*tl - sin*tw, z: z - sin*tl + cos*tw }
+    ];
+    for (var i = 0; i < 4; i++) {
+        var n = (i+1)%4;
+        drawLine3D(tc[i].x, bh+2, tc[i].z, tc[n].x, bh+2, tc[n].z);
+        drawLine3D(tc[i].x, bh+th+2, tc[i].z, tc[n].x, bh+th+2, tc[n].z);
+        drawLine3D(tc[i].x, bh+2, tc[i].z, tc[i].x, bh+th+2, tc[i].z);
+    }
+    
+    // Barrel
+    var barrelLen = 25;
+    var bx = x + cos * barrelLen;
+    var bz = z + sin * barrelLen;
+    drawLine3D(x, bh + th, z, bx, bh + th, bz);
+}
+
+function drawShell(s) {
+    // Draw as a long bright tracer line
+    var p = projectPoint(s.x, s.y, s.z);
+    if (!p) return;
+    
+    // Trail end point (behind the shell)
+    var tx = s.x - s.dx * 2;
+    var tz = s.z - s.dz * 2;
+    var p2 = projectPoint(tx, s.y, tz);
+    
+    var col = s.friendly ? '#0f0' : '#f00';
+    
+    // Draw bright dot
+    var r = Math.max(3, 300 / p.z);
+    gl.fillStyle = col;
+    gl.beginPath();
+    gl.arc(p.x, p.y, r, 0, Math.PI * 2);
+    gl.fill();
+    
+    // Draw tracer line
+    if (p2) {
+        gl.strokeStyle = col;
+        gl.lineWidth = Math.max(2, 150 / p.z);
+        gl.beginPath();
+        gl.moveTo(p2.x, p2.y);
+        gl.lineTo(p.x, p.y);
+        gl.stroke();
+    }
+    
+    // Glow effect
+    gl.shadowColor = col;
+    gl.shadowBlur = 10;
+    gl.fillStyle = col;
+    gl.beginPath();
+    gl.arc(p.x, p.y, r * 0.5, 0, Math.PI * 2);
+    gl.fill();
+    gl.shadowBlur = 0;
+}
+
+function drawExplosion(ex) {
+    gl.strokeStyle = '#ff0';
+    gl.lineWidth = 2;
+    var r = ex.radius;
+    for (var i = 0; i < 8; i++) {
+        var a = (i / 8) * Math.PI * 2 + ex.t * 0.5;
+        var x1 = ex.x + Math.cos(a) * r * 0.3;
+        var z1 = ex.z + Math.sin(a) * r * 0.3;
+        var x2 = ex.x + Math.cos(a) * r;
+        var z2 = ex.z + Math.sin(a) * r;
+        drawLine3D(x1, 5 + Math.random()*5, z1, x2, 5 + Math.random()*10, z2);
+    }
+}
+
+function drawCrosshair() {
+    var cx = W/2, cy = H/2;
+    gl.strokeStyle = '#0f0';
+    gl.lineWidth = 2;
+    gl.beginPath();
+    gl.moveTo(cx - 30, cy); gl.lineTo(cx - 10, cy);
+    gl.moveTo(cx + 10, cy); gl.lineTo(cx + 30, cy);
+    gl.moveTo(cx, cy - 30); gl.lineTo(cx, cy - 10);
+    gl.moveTo(cx, cy + 10); gl.lineTo(cx, cy + 30);
+    gl.stroke();
+    // Small center dot
+    gl.fillStyle = '#0f0';
+    gl.beginPath();
+    gl.arc(cx, cy, 2, 0, Math.PI*2);
+    gl.fill();
+}
+
+function drawHUD() {
+    gl.fillStyle = '#0f0';
+    gl.font = 'bold 20px Courier New';
+    gl.textAlign = 'left';
+    gl.fillText('SCORE: ' + score, 20, 35);
+    gl.fillText('LIVES: ' + lives, 20, 62);
+    gl.textAlign = 'right';
+    gl.fillText('LEVEL: ' + level, W - 20, 35);
+    
+    // Radar
+    var rx = W - 80, ry = H - 80, rs = 55;
+    gl.strokeStyle = 'rgba(0,255,0,0.4)';
+    gl.lineWidth = 1;
+    gl.beginPath(); gl.arc(rx, ry, rs, 0, Math.PI*2); gl.stroke();
+    // Player
+    gl.fillStyle = '#0f0';
+    gl.fillRect(rx-2, ry-2, 4, 4);
+    // Direction line
+    gl.strokeStyle = '#0f0'; gl.lineWidth = 2;
+    gl.beginPath();
+    gl.moveTo(rx, ry);
+    gl.lineTo(rx - Math.sin(cam.rot)*12, ry - Math.cos(cam.rot)*12);
+    gl.stroke();
+    // Enemies
+    for (var i = 0; i < enemies.length; i++) {
+        var dx = enemies[i].x - cam.x;
+        var dz = enemies[i].z - cam.z;
+        var d = Math.sqrt(dx*dx + dz*dz);
+        if (d > 600) continue;
+        var nx = (dx / 600) * rs;
+        var nz = (dz / 600) * rs;
+        gl.fillStyle = '#f00';
+        gl.fillRect(rx + nx - 2, ry + nz - 2, 4, 4);
+    }
+    
+    // Controls help (bottom)
+    gl.fillStyle = 'rgba(0,255,0,0.5)';
+    gl.font = '14px Courier New';
+    gl.textAlign = 'center';
+    gl.fillText('W/S: Move  A/D: Turn  SPACE: Fire', W/2, H - 15);
+}
+
+// ============================================================
+// GAME LOGIC
+// ============================================================
+
+function firePlayerShell() {
+    if (shellInFlight) return; // one at a time like the original
+    // Forward direction: derived from projection math
+    // In projectPoint, cz = -dx*sin(rot) + dz*cos(rot), so forward is (-sin(rot), cos(rot))
+    var fdx = -Math.sin(cam.rot) * shellSpeed;
+    var fdz = Math.cos(cam.rot) * shellSpeed;
+    shellInFlight = {
+        x: cam.x + fdx * 3,
+        y: camY,
+        z: cam.z + fdz * 3,
+        dx: fdx, dz: fdz,
+        life: 100,
+        friendly: true
+    };
+    bangTimer = 20;
+}
+
+function update() {
+    if (!alive) return;
+    
+    // Player movement
+    var accel = 0;
+    if (input.fwd) accel = 0.15;
+    if (input.back) accel = -0.1;
+    speed += accel;
+    speed *= 0.92; // friction
+    if (Math.abs(speed) < 0.01) speed = 0;
+    
+    if (input.left) cam.rot += 0.03;
+    if (input.right) cam.rot -= 0.03;
+    
+    var nx = cam.x - Math.sin(cam.rot) * speed;
+    var nz = cam.z + Math.cos(cam.rot) * speed;
+    
+    // Collision with obstacles
+    var blocked = false;
+    for (var i = 0; i < obstacles.length; i++) {
+        var dx = nx - obstacles[i].x;
+        var dz = nz - obstacles[i].z;
+        if (Math.sqrt(dx*dx + dz*dz) < obstacles[i].size + 8) {
+            blocked = true; speed = 0; break;
+        }
+    }
+    if (!blocked) { cam.x = nx; cam.z = nz; }
+    
+    // Clamp to world bounds
+    cam.x = Math.max(-950, Math.min(950, cam.x));
+    cam.z = Math.max(-950, Math.min(950, cam.z));
+    
+    // Fire
+    if (input.fire) {
+        firePlayerShell();
+        input.fire = false;
+    }
+    
+    // Update player shell
+    if (shellInFlight) {
+        var s = shellInFlight;
+        var prevX = s.x;
+        var prevZ = s.z;
+        s.x += s.dx;
+        s.z += s.dz;
+        s.life--;
+        
+        if (s.life <= 0) {
+            shellInFlight = null;
+        } else {
+            // Swept collision - check along the path from prev to current
+            for (var i = enemies.length - 1; i >= 0; i--) {
+                // Point-to-segment distance
+                var ex = enemies[i].x, ez = enemies[i].z;
+                var segX = s.x - prevX, segZ = s.z - prevZ;
+                var segLen = Math.sqrt(segX*segX + segZ*segZ);
+                var toEX = ex - prevX, toEZ = ez - prevZ;
+                var t = (toEX*segX + toEZ*segZ) / (segLen*segLen);
+                t = Math.max(0, Math.min(1, t));
+                var closestX = prevX + segX * t;
+                var closestZ = prevZ + segZ * t;
+                var hitDx = ex - closestX, hitDz = ez - closestZ;
+                var hitDist = hitDx*hitDx + hitDz*hitDz;
+                
+                if (hitDist < 30*30) {
+                    // Hit!
+                    explosions.push({ x: enemies[i].x, z: enemies[i].z, t: 0, radius: 20 });
+                    enemies.splice(i, 1);
+                    shellInFlight = null;
+                    score += 100 * level;
+                    kills++;
+                    level = Math.floor(kills / 5) + 1;
+                    break;
+                }
+            }
+        }
+    }
+    
+    // Update enemy shells
+    for (var i = enemyShells.length - 1; i >= 0; i--) {
+        var s = enemyShells[i];
+        s.x += s.dx;
+        s.z += s.dz;
+        s.life--;
+        if (s.life <= 0) { enemyShells.splice(i, 1); continue; }
+        
+        // Hit player?
+        var dx = s.x - cam.x;
+        var dz = s.z - cam.z;
+        if (dx*dx + dz*dz < 8*8) {
+            enemyShells.splice(i, 1);
+            lives--;
+            explosions.push({ x: cam.x, z: cam.z, t: 0, radius: 15 });
+            if (lives <= 0) {
+                alive = false;
+            }
+        }
+    }
+    
+    // Update enemies
+    for (var i = 0; i < enemies.length; i++) {
+        var e = enemies[i];
+        var dx = cam.x - e.x;
+        var dz = cam.z - e.z;
+        var dist = Math.sqrt(dx*dx + dz*dz);
+        var angleToPlayer = Math.atan2(dx, dz);
+        
+        // State machine AI
+        if (!e.state) e.state = 'approach';
+        if (!e.stateTimer) e.stateTimer = 0;
+        e.stateTimer--;
+        
+        switch(e.state) {
+            case 'approach':
+                // Drive toward player until in firing range
+                var diff = angleToPlayer - e.rot;
+                while (diff > Math.PI) diff -= Math.PI*2;
+                while (diff < -Math.PI) diff += Math.PI*2;
+                e.rot += Math.sign(diff) * Math.min(Math.abs(diff), 0.025);
+                e.x += Math.sin(e.rot) * e.speed;
+                e.z += Math.cos(e.rot) * e.speed;
+                
+                if (dist < 250) {
+                    e.state = 'aim';
+                    e.stateTimer = 90 + Math.floor(Math.random() * 60);
+                }
+                break;
+                
+            case 'aim':
+                // Stop and turn to face player, then fire
+                var diff = angleToPlayer - e.rot;
+                while (diff > Math.PI) diff -= Math.PI*2;
+                while (diff < -Math.PI) diff += Math.PI*2;
+                e.rot += Math.sign(diff) * Math.min(Math.abs(diff), 0.03);
+                
+                if (e.stateTimer <= 0) {
+                    // Fire!
+                    var inaccuracy = 0.3 + Math.random() * 0.2;
+                    var shellAngle = e.rot + (Math.random() - 0.5) * inaccuracy;
+                    var shellDx = Math.sin(shellAngle) * 5;
+                    var shellDz = Math.cos(shellAngle) * 5;
+                    enemyShells.push({
+                        x: e.x + shellDx*3, y: 8, z: e.z + shellDz*3,
+                        dx: shellDx, dz: shellDz,
+                        life: 40, friendly: false
+                    });
+                    // After firing, decide next action
+                    var r = Math.random();
+                    if (r < 0.4) {
+                        e.state = 'strafe';
+                        e.strafeDir = Math.random() < 0.5 ? 1 : -1;
+                        e.stateTimer = 60 + Math.floor(Math.random() * 50);
+                    } else if (r < 0.7) {
+                        e.state = 'retreat';
+                        e.stateTimer = 40 + Math.floor(Math.random() * 30);
+                    } else {
+                        e.state = 'aim';
+                        e.stateTimer = 80 + Math.floor(Math.random() * 50);
+                    }
+                }
+                break;
+                
+            case 'strafe':
+                // Move perpendicular to player to dodge
+                var perpAngle = angleToPlayer + (Math.PI/2) * e.strafeDir;
+                var diff = perpAngle - e.rot;
+                while (diff > Math.PI) diff -= Math.PI*2;
+                while (diff < -Math.PI) diff += Math.PI*2;
+                e.rot += Math.sign(diff) * Math.min(Math.abs(diff), 0.03);
+                e.x += Math.sin(e.rot) * e.speed * 0.8;
+                e.z += Math.cos(e.rot) * e.speed * 0.8;
+                
+                if (e.stateTimer <= 0) {
+                    e.state = 'aim';
+                    e.stateTimer = 30 + Math.floor(Math.random() * 20);
+                }
+                break;
+                
+            case 'retreat':
+                // Back away from player
+                var awayAngle = angleToPlayer + Math.PI;
+                var diff = awayAngle - e.rot;
+                while (diff > Math.PI) diff -= Math.PI*2;
+                while (diff < -Math.PI) diff += Math.PI*2;
+                e.rot += Math.sign(diff) * Math.min(Math.abs(diff), 0.02);
+                e.x += Math.sin(e.rot) * e.speed * 0.6;
+                e.z += Math.cos(e.rot) * e.speed * 0.6;
+                
+                if (e.stateTimer <= 0 || dist > 350) {
+                    e.state = 'approach';
+                    e.stateTimer = 0;
+                }
+                break;
+        }
+        
+        // If too far away, always approach
+        if (dist > 400 && e.state !== 'approach') {
+            e.state = 'approach';
+        }
+    }
+    
+    // Update explosions
+    for (var i = explosions.length - 1; i >= 0; i--) {
+        explosions[i].t++;
+        explosions[i].radius += 2;
+        if (explosions[i].t > 20) explosions.splice(i, 1);
+    }
+    
+    // Spawn enemies
+    spawnTimer--;
+    if (spawnTimer <= 0 && enemies.length < Math.min(2 + level, 6)) {
+        spawnEnemy();
+        spawnTimer = Math.max(100, 300 - level * 30);
+    }
+}
+
+// ============================================================
+// RENDER
+// ============================================================
+function render() {
+    gl.fillStyle = '#000';
+    gl.fillRect(0, 0, W, H);
+    
+    drawMountainRange();
+    drawGroundGrid();
+    
+    // Draw obstacles
+    for (var i = 0; i < obstacles.length; i++) drawObstacle(obstacles[i]);
+    
+    // Draw enemies
+    for (var i = 0; i < enemies.length; i++) drawEnemyTank(enemies[i]);
+    
+    // Draw shells
+    if (shellInFlight) drawShell(shellInFlight);
+    for (var i = 0; i < enemyShells.length; i++) drawShell(enemyShells[i]);
+    
+    // Draw explosions
+    for (var i = 0; i < explosions.length; i++) drawExplosion(explosions[i]);
+    
+    // HUD elements
+    drawCrosshair();
+    drawHUD();
+    
+    // BANG! indicator
+    if (bangTimer > 0) {
+        var alpha = bangTimer / 20;
+        gl.fillStyle = 'rgba(0,255,0,' + alpha + ')';
+        gl.font = 'bold 36px Courier New';
+        gl.textAlign = 'center';
+        gl.fillText('BANG!', W/2, H/2 + 80);
+        bangTimer--;
+    }
+    
+    // Shell in-flight indicator
+    if (shellInFlight) {
+        gl.fillStyle = '#0f0';
+        gl.font = '14px Courier New';
+        gl.textAlign = 'left';
+        gl.fillText('>>> SHELL IN FLIGHT >>>', 20, H - 40);
+    }
+    
+    // Death screen
+    if (!alive) {
+        gl.fillStyle = 'rgba(255,0,0,0.15)';
+        gl.fillRect(0, 0, W, H);
+        gl.fillStyle = '#f00';
+        gl.font = 'bold 60px Courier New';
+        gl.textAlign = 'center';
+        gl.fillText('DESTROYED', W/2, H/2 - 30);
+        gl.fillStyle = '#0f0';
+        gl.font = '28px Courier New';
+        gl.fillText('Score: ' + score + '   Kills: ' + kills, W/2, H/2 + 20);
+        gl.font = '20px Courier New';
+        gl.fillText('Press R to restart', W/2, H/2 + 60);
+    }
+}
+
+// ============================================================
+// GAME LOOP
+// ============================================================
+function frame() {
+    update();
+    render();
+    requestAnimationFrame(frame);
+}
+
+function startGame() {
+    cam.x = 0; cam.z = 0; cam.rot = 0;
+    speed = 0;
+    alive = true;
+    score = 0; kills = 0; lives = 5; level = 1;
+    shellInFlight = null;
+    enemies = [];
+    enemyShells = [];
+    explosions = [];
+    spawnTimer = 60;
+    generateWorld();
+}
+
+// Restart on R
+document.addEventListener('keydown', function(e) {
+    if (e.code === 'KeyR' && !alive) {
+        startGame();
+    }
+});
+
+startGame();
+frame();
+</script>
+</body>
+</html>
