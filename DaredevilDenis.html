@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Daredevil Denis</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #000; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; font-family: monospace; }
+canvas { display: block; border: 2px solid #fff; image-rendering: pixelated; }
+.info { color: #ff0; font-size: 14px; margin-top: 10px; text-align: center; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="info">A/D or ←/→: Accelerate/Brake | SPACE: Jump</div>
+<script>
+var c = document.getElementById('c');
+var ctx = c.getContext('2d');
+c.width = 800;
+c.height = 500;
+var W = c.width, H = c.height;
+
+// Game constants
+var PLATFORM_H = 12;
+var NUM_PLATFORMS = 4;
+var PLAT_GAP = (H - 60) / NUM_PLATFORMS;
+var GRAVITY = 0.6;
+var JUMP_FORCE = -12;
+var MAX_SPEED = 6;
+var ACCEL = 0.15;
+var BRAKE = 0.1;
+var FRICTION = 0.02;
+
+// Platform Y positions (top of each platform)
+var platforms = [];
+for (var i = 0; i < NUM_PLATFORMS; i++) {
+    platforms.push(50 + i * PLAT_GAP);
+}
+
+// Game state
+var denis, hazards, collectibles, score, lives, level, gameOver, gameWon;
+var scrollX = 0;
+var LEVEL_WIDTH = 2400;
+var helicopter;
+var frameCount = 0;
+var input = { left: false, right: false, jump: false };
+
+// Input
+document.addEventListener('keydown', function(e) {
+    if (e.code === 'KeyA' || e.code === 'ArrowLeft') input.left = true;
+    if (e.code === 'KeyD' || e.code === 'ArrowRight') input.right = true;
+    if (e.code === 'Space') { e.preventDefault(); input.jump = true; }
+    if (e.code === 'KeyR' && gameOver) startGame();
+});
+document.addEventListener('keyup', function(e) {
+    if (e.code === 'KeyA' || e.code === 'ArrowLeft') input.left = false;
+    if (e.code === 'KeyD' || e.code === 'ArrowRight') input.right = false;
+    if (e.code === 'Space') input.jump = false;
+});
+
+function startGame() {
+    score = 0;
+    lives = 3;
+    level = 1;
+    gameOver = false;
+    gameWon = false;
+    startLevel();
+}
+
+function startLevel() {
+    denis = {
+        x: 50,
+        y: platforms[0] - 30,
+        vx: 0,
+        vy: 0,
+        w: 40,
+        h: 28,
+        onGround: true,
+        platform: 0,
+        wheelAnim: 0,
+        invincible: 0
+    };
+    scrollX = 0;
+    generateLevel();
+}
+
+function generateLevel() {
+    hazards = [];
+    collectibles = [];
+    
+    var numHazards = 8 + level * 3;
+    var numCollectibles = 5 + level;
+    
+    // Static hazards on platforms
+    for (var i = 0; i < numHazards; i++) {
+        var plat = Math.floor(Math.random() * NUM_PLATFORMS);
+        var hx = 200 + Math.random() * (LEVEL_WIDTH - 400);
+        var type = Math.random();
+        var h;
+        
+        if (type < 0.25) {
+            // Tree
+            h = { x: hx, y: platforms[plat] - 40, w: 20, h: 40, type: 'tree', platform: plat };
+        } else if (type < 0.5) {
+            // House
+            h = { x: hx, y: platforms[plat] - 35, w: 35, h: 35, type: 'house', platform: plat };
+        } else if (type < 0.75) {
+            // Moving ambulance
+            h = { x: hx, y: platforms[plat] - 25, w: 45, h: 25, type: 'ambulance', platform: plat, vx: (1 + Math.random()) * (Math.random() < 0.5 ? 1 : -1), startX: hx };
+        } else {
+            // Spider (moves up and down)
+            h = { x: hx, y: platforms[plat] - 50, w: 20, h: 20, type: 'spider', platform: plat, baseY: platforms[plat] - 50, phase: Math.random() * Math.PI * 2 };
+        }
+        hazards.push(h);
+    }
+    
+    // Helicopter
+    helicopter = {
+        x: 100, y: 30, vx: 2 + level * 0.3, w: 60, h: 25
+    };
+    
+    // Collectibles (Oscar pieces dropped by balloon)
+    for (var j = 0; j < numCollectibles; j++) {
+        var cx = 150 + (j / numCollectibles) * (LEVEL_WIDTH - 300);
+        var cp = Math.floor(Math.random() * NUM_PLATFORMS);
+        collectibles.push({
+            x: cx,
+            y: platforms[cp] - 35,
+            w: 16,
+            h: 20,
+            collected: false,
+            platform: cp,
+            bobPhase: Math.random() * Math.PI * 2
+        });
+    }
+}
+
+function update() {
+    if (gameOver) return;
+    frameCount++;
+    
+    // Denis movement
+    if (input.right) {
+        denis.vx = Math.min(denis.vx + ACCEL, MAX_SPEED);
+    } else if (input.left) {
+        denis.vx = Math.max(denis.vx - BRAKE, -1);
+    } else {
+        if (denis.vx > 0) denis.vx = Math.max(0, denis.vx - FRICTION);
+        else if (denis.vx < 0) denis.vx = Math.min(0, denis.vx + FRICTION);
+    }
+    
+    // Jump
+    if (input.jump && denis.onGround) {
+        denis.vy = JUMP_FORCE;
+        denis.onGround = false;
+    }
+    
+    // Gravity
+    if (!denis.onGround) {
+        denis.vy += GRAVITY;
+    }
+    
+    // Move Denis
+    denis.x += denis.vx;
+    denis.y += denis.vy;
+    
+    // Platform collision
+    denis.onGround = false;
+    for (var i = 0; i < NUM_PLATFORMS; i++) {
+        var py = platforms[i];
+        if (denis.vy >= 0 && denis.y + denis.h >= py && denis.y + denis.h <= py + 20) {
+            denis.y = py - denis.h;
+            denis.vy = 0;
+            denis.onGround = true;
+            denis.platform = i;
+        }
+    }
+    
+    // Fall off bottom
+    if (denis.y > H + 50) {
+        loseLife();
+        return;
+    }
+    
+    // Keep in level bounds
+    if (denis.x < 0) { denis.x = 0; denis.vx = 0; }
+    if (denis.x > LEVEL_WIDTH - denis.w) { denis.x = LEVEL_WIDTH - denis.w; denis.vx = 0; }
+    
+    // Scroll camera
+    var targetScroll = denis.x - W * 0.3;
+    scrollX = Math.max(0, Math.min(LEVEL_WIDTH - W, targetScroll));
+    
+    // Wheel animation
+    denis.wheelAnim += Math.abs(denis.vx) * 0.3;
+    
+    // Invincibility timer
+    if (denis.invincible > 0) denis.invincible--;
+    
+    // Update hazards
+    for (var i = 0; i < hazards.length; i++) {
+        var h = hazards[i];
+        if (h.type === 'ambulance') {
+            h.x += h.vx;
+            if (h.x < h.startX - 150 || h.x > h.startX + 150) h.vx = -h.vx;
+        } else if (h.type === 'spider') {
+            h.phase += 0.05;
+            h.y = h.baseY + Math.sin(h.phase) * 25;
+        }
+        
+        // Collision with Denis
+        if (denis.invincible <= 0 && rectsOverlap(denis, h)) {
+            loseLife();
+            return;
+        }
+    }
+    
+    // Helicopter
+    helicopter.x += helicopter.vx;
+    if (helicopter.x > LEVEL_WIDTH + 60) helicopter.x = -80;
+    if (helicopter.x < -80) helicopter.x = LEVEL_WIDTH + 60;
+    
+    // Helicopter collision
+    if (denis.invincible <= 0 && denis.y < 80) {
+        var hRect = { x: helicopter.x, y: helicopter.y, w: helicopter.w, h: helicopter.h };
+        if (rectsOverlap(denis, hRect)) {
+            loseLife();
+            return;
+        }
+    }
+    
+    // Collectibles
+    var allCollected = true;
+    for (var i = 0; i < collectibles.length; i++) {
+        var col = collectibles[i];
+        if (col.collected) continue;
+        allCollected = false;
+        col.bobPhase += 0.04;
+        
+        if (rectsOverlap(denis, col)) {
+            col.collected = true;
+            score += 100 * level;
+        }
+    }
+    
+    // Level complete
+    if (allCollected) {
+        level++;
+        if (level > 10) {
+            gameWon = true;
+            gameOver = true;
+        } else {
+            startLevel();
+        }
+    }
+}
+
+function rectsOverlap(a, b) {
+    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function loseLife() {
+    lives--;
+    if (lives <= 0) {
+        gameOver = true;
+    } else {
+        denis.x = 50;
+        denis.y = platforms[0] - 30;
+        denis.vx = 0;
+        denis.vy = 0;
+        denis.onGround = true;
+        denis.invincible = 90;
+        scrollX = 0;
+    }
+}
+
+function render() {
+    // Sky gradient
+    var skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+    skyGrad.addColorStop(0, '#2040a0');
+    skyGrad.addColorStop(1, '#60a0d0');
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, W, H);
+    
+    // Platforms
+    for (var i = 0; i < NUM_PLATFORMS; i++) {
+        var py = platforms[i];
+        ctx.fillStyle = '#444';
+        ctx.fillRect(0, py, W, PLATFORM_H);
+        ctx.fillStyle = '#666';
+        ctx.fillRect(0, py, W, 3);
+        // Road markings
+        ctx.fillStyle = '#ff0';
+        for (var mx = -scrollX % 60; mx < W; mx += 60) {
+            ctx.fillRect(mx, py + 5, 25, 3);
+        }
+    }
+    
+    ctx.save();
+    ctx.translate(-scrollX, 0);
+    
+    // Draw collectibles
+    for (var i = 0; i < collectibles.length; i++) {
+        var col = collectibles[i];
+        if (col.collected) continue;
+        var bobY = col.y + Math.sin(col.bobPhase) * 4;
+        // Balloon
+        ctx.fillStyle = '#f00';
+        ctx.beginPath();
+        ctx.arc(col.x + 8, bobY - 10, 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(col.x + 8, bobY - 2);
+        ctx.lineTo(col.x + 8, bobY + 5);
+        ctx.stroke();
+        // Oscar piece (gold star)
+        ctx.fillStyle = '#ffd700';
+        drawStar(col.x + 8, bobY + 12, 7, 5, 0.5);
+    }
+    
+    // Draw hazards
+    for (var i = 0; i < hazards.length; i++) {
+        var h = hazards[i];
+        drawHazard(h);
+    }
+    
+    // Draw Denis (motorbike)
+    if (denis.invincible <= 0 || (frameCount % 4 < 2)) {
+        drawDenis();
+    }
+    
+    // Helicopter
+    drawHelicopter();
+    
+    ctx.restore();
+    
+    // HUD
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, 22);
+    ctx.fillStyle = '#ff0';
+    ctx.font = 'bold 16px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('SCORE: ' + score, 10, 16);
+    ctx.textAlign = 'center';
+    ctx.fillText('LIVES: ' + lives, W/2, 16);
+    ctx.textAlign = 'right';
+    ctx.fillText('LEVEL: ' + level, W - 10, 16);
+    
+    // Progress bar
+    var progress = denis.x / LEVEL_WIDTH;
+    ctx.fillStyle = '#333';
+    ctx.fillRect(W/2 - 100, H - 15, 200, 8);
+    ctx.fillStyle = '#0f0';
+    ctx.fillRect(W/2 - 100, H - 15, 200 * progress, 8);
+    
+    // Game over / won
+    if (gameOver) {
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = gameWon ? '#ffd700' : '#f00';
+        ctx.font = 'bold 48px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(gameWon ? 'YOU WIN!' : 'GAME OVER', W/2, H/2 - 20);
+        ctx.fillStyle = '#fff';
+        ctx.font = '24px monospace';
+        ctx.fillText('Score: ' + score, W/2, H/2 + 20);
+        ctx.font = '18px monospace';
+        ctx.fillText('Press R to restart', W/2, H/2 + 55);
+    }
+}
+
+function drawDenis() {
+    var x = denis.x, y = denis.y;
+    // Body of bike
+    ctx.fillStyle = '#c00';
+    ctx.fillRect(x + 8, y + 8, 24, 10);
+    // Seat
+    ctx.fillStyle = '#333';
+    ctx.fillRect(x + 12, y + 4, 10, 6);
+    // Denis (rider)
+    ctx.fillStyle = '#ffd700';
+    // Helmet
+    ctx.beginPath();
+    ctx.arc(x + 17, y - 2, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#00c';
+    // Body
+    ctx.fillRect(x + 13, y + 2, 9, 8);
+    // Wheels
+    var wheelR = 7;
+    var spin = denis.wheelAnim;
+    ctx.fillStyle = '#222';
+    ctx.beginPath();
+    ctx.arc(x + 10, y + 22, wheelR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + 32, y + 22, wheelR, 0, Math.PI * 2);
+    ctx.fill();
+    // Wheel spokes
+    ctx.strokeStyle = '#888';
+    ctx.lineWidth = 1;
+    for (var s = 0; s < 4; s++) {
+        var a = spin + s * Math.PI / 2;
+        ctx.beginPath();
+        ctx.moveTo(x + 10, y + 22);
+        ctx.lineTo(x + 10 + Math.cos(a) * wheelR, y + 22 + Math.sin(a) * wheelR);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x + 32, y + 22);
+        ctx.lineTo(x + 32 + Math.cos(a) * wheelR, y + 22 + Math.sin(a) * wheelR);
+        ctx.stroke();
+    }
+    // Exhaust puff when moving
+    if (Math.abs(denis.vx) > 1) {
+        ctx.fillStyle = 'rgba(200,200,200,0.5)';
+        ctx.beginPath();
+        ctx.arc(x - 2 + Math.random() * 4, y + 18 + Math.random() * 4, 3 + Math.random() * 3, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+function drawHazard(h) {
+    if (h.type === 'tree') {
+        // Trunk
+        ctx.fillStyle = '#654321';
+        ctx.fillRect(h.x + 7, h.y + 20, 6, 20);
+        // Foliage
+        ctx.fillStyle = '#0a0';
+        ctx.beginPath();
+        ctx.arc(h.x + 10, h.y + 12, 12, 0, Math.PI * 2);
+        ctx.fill();
+    } else if (h.type === 'house') {
+        // Walls
+        ctx.fillStyle = '#a52a2a';
+        ctx.fillRect(h.x, h.y + 12, h.w, h.h - 12);
+        // Roof
+        ctx.fillStyle = '#555';
+        ctx.beginPath();
+        ctx.moveTo(h.x - 3, h.y + 12);
+        ctx.lineTo(h.x + h.w / 2, h.y);
+        ctx.lineTo(h.x + h.w + 3, h.y + 12);
+        ctx.closePath();
+        ctx.fill();
+        // Window
+        ctx.fillStyle = '#ff0';
+        ctx.fillRect(h.x + 12, h.y + 18, 10, 10);
+    } else if (h.type === 'ambulance') {
+        // Body
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(h.x, h.y, h.w, h.h - 6);
+        // Red cross
+        ctx.fillStyle = '#f00';
+        ctx.fillRect(h.x + 18, h.y + 3, 10, 4);
+        ctx.fillRect(h.x + 21, h.y + 1, 4, 8);
+        // Wheels
+        ctx.fillStyle = '#222';
+        ctx.beginPath(); ctx.arc(h.x + 10, h.y + h.h - 3, 5, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(h.x + 35, h.y + h.h - 3, 5, 0, Math.PI * 2); ctx.fill();
+        // Flashing light
+        ctx.fillStyle = (frameCount % 20 < 10) ? '#f00' : '#00f';
+        ctx.fillRect(h.x + 20, h.y - 4, 6, 4);
+    } else if (h.type === 'spider') {
+        // Body
+        ctx.fillStyle = '#111';
+        ctx.beginPath();
+        ctx.arc(h.x + 10, h.y + 10, 8, 0, Math.PI * 2);
+        ctx.fill();
+        // Legs
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth = 2;
+        for (var l = 0; l < 4; l++) {
+            var lx = h.x + 10 + (l < 2 ? -8 : 8);
+            var ly = h.y + 5 + l * 4;
+            var legEnd = l < 2 ? -6 : 6;
+            ctx.beginPath();
+            ctx.moveTo(h.x + 10, ly);
+            ctx.lineTo(lx, ly);
+            ctx.lineTo(lx + legEnd, ly + 5);
+            ctx.stroke();
+        }
+        // Eyes
+        ctx.fillStyle = '#f00';
+        ctx.beginPath(); ctx.arc(h.x + 7, h.y + 8, 2, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(h.x + 13, h.y + 8, 2, 0, Math.PI * 2); ctx.fill();
+        // Thread
+        ctx.strokeStyle = '#aaa';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(h.x + 10, h.y);
+        ctx.lineTo(h.x + 10, h.y - 30);
+        ctx.stroke();
+    }
+}
+
+function drawHelicopter() {
+    var x = helicopter.x, y = helicopter.y;
+    // Body
+    ctx.fillStyle = '#4a4';
+    ctx.fillRect(x + 10, y + 8, 35, 15);
+    // Cockpit
+    ctx.fillStyle = '#8df';
+    ctx.beginPath();
+    ctx.arc(x + 48, y + 15, 10, -Math.PI/2, Math.PI/2);
+    ctx.fill();
+    // Tail
+    ctx.fillStyle = '#4a4';
+    ctx.fillRect(x, y + 12, 15, 5);
+    ctx.fillRect(x - 2, y + 5, 8, 12);
+    // Rotor
+    var rotorPhase = frameCount * 0.5;
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x + 15 + Math.cos(rotorPhase) * 28, y + 6);
+    ctx.lineTo(x + 15 - Math.cos(rotorPhase) * 28, y + 6);
+    ctx.stroke();
+    // Skids
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x + 15, y + 24); ctx.lineTo(x + 45, y + 24);
+    ctx.stroke();
+}
+
+function drawStar(cx, cy, r, points, inner) {
+    ctx.beginPath();
+    for (var i = 0; i < points * 2; i++) {
+        var a = (i / (points * 2)) * Math.PI * 2 - Math.PI / 2;
+        var rad = (i % 2 === 0) ? r : r * inner;
+        var sx = cx + Math.cos(a) * rad;
+        var sy = cy + Math.sin(a) * rad;
+        if (i === 0) ctx.moveTo(sx, sy);
+        else ctx.lineTo(sx, sy);
+    }
+    ctx.closePath();
+    ctx.fill();
+}
+
+function gameLoop() {
+    update();
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+startGame();
+gameLoop();
+</script>
+</body>
+</html>
