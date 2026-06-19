@@ -33,7 +33,7 @@ for (var i = 0; i < NUM_PLATFORMS; i++) {
 }
 
 var GRAVITY = 0.5;
-var JUMP_FORCE = -10;
+var JUMP_FORCE = -11;
 var MAX_SPEED = 5;
 var ACCEL = 0.12;
 var BRAKE = 0.08;
@@ -58,7 +58,7 @@ document.addEventListener('keyup', function(e) {
 
 function startGame() {
     score = 0;
-    lives = 3;
+    lives = 5;
     level = 1;
     gameOver = false;
     gameWon = false;
@@ -85,7 +85,7 @@ function generateLevel() {
     hazards = [];
     collectibles = [];
     
-    var numPerRow = 2 + level;
+    var numPerRow = Math.floor(1 + level * 0.5);
     
     for (var row = 0; row < NUM_PLATFORMS; row++) {
         var py = platforms[row];
@@ -102,7 +102,7 @@ function generateLevel() {
                 hazard = { x: hx, y: py - 30, w: 35, h: 30, type: 'house', platform: row };
             } else if (type < 0.75) {
                 hazard = { x: hx, y: py - 22, w: 45, h: 22, type: 'ambulance', platform: row,
-                    vx: (1 + Math.random()) * (Math.random() < 0.5 ? 1 : -1), startX: hx };
+                    vx: (0.5 + Math.random() * 0.5) * (Math.random() < 0.5 ? 1 : -1), startX: hx };
             } else {
                 hazard = { x: hx, y: py - 45, w: 20, h: 20, type: 'spider', platform: row,
                     baseY: py - 45, phase: Math.random() * Math.PI * 2 };
@@ -124,7 +124,7 @@ function generateLevel() {
         }
     }
     
-    helicopter = { x: -60, y: HUD_H + 15, vx: 2 + level * 0.4, w: 60, h: 22 };
+    helicopter = { x: -60, y: HUD_H + 15, vx: 1.5 + level * 0.2, w: 60, h: 22 };
 }
 
 function update() {
@@ -264,7 +264,7 @@ function loseLife() {
         denis.vy = 0;
         denis.onGround = true;
         denis.platform = 0;
-        denis.invincible = 90;
+        denis.invincible = 120;
     }
 }
 
