@@ -210,9 +210,10 @@ function drawGroundGrid() {
 }
 
 function drawMountainRange() {
-    var dist = 900, segments = 80;
-    gl.beginPath();
-    gl.moveTo(0, H*0.42);
+    var dist = 900, segments = 120;
+    
+    // Collect visible mountain points
+    var points = [];
     for (var i = 0; i <= segments; i++) {
         var angle = (i / segments) * Math.PI * 2;
         var wx = cam.x + Math.cos(angle) * dist;
@@ -220,12 +221,34 @@ function drawMountainRange() {
         var seed = Math.floor(angle * 20);
         var mh = 30 + Math.abs(Math.sin(seed * 3.7) * 60) + Math.abs(Math.cos(seed * 2.3) * 30);
         var p = projectPoint(wx, mh, wz);
-        if (p) gl.lineTo(p.x, p.y);
+        var pBase = projectPoint(wx, 0, wz);
+        if (p && pBase) {
+            points.push({ x: p.x, y: p.y, baseY: pBase.y });
+        }
     }
-    gl.lineTo(W, H*0.42);
+    
+    if (points.length < 2) return;
+    
+    // Draw filled mountain shape
+    gl.beginPath();
+    gl.moveTo(points[0].x, points[0].baseY);
+    for (var i = 0; i < points.length; i++) {
+        gl.lineTo(points[i].x, points[i].y);
+    }
+    gl.lineTo(points[points.length-1].x, points[points.length-1].baseY);
     gl.closePath();
     gl.fillStyle = '#1a3a1a';
     gl.fill();
+    
+    // Draw mountain outline on top
+    gl.strokeStyle = '#2a5a2a';
+    gl.lineWidth = 1.5;
+    gl.beginPath();
+    gl.moveTo(points[0].x, points[0].y);
+    for (var i = 1; i < points.length; i++) {
+        gl.lineTo(points[i].x, points[i].y);
+    }
+    gl.stroke();
 }
 
 function drawObstacle(ob) {
