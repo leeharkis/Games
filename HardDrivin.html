@@ -177,10 +177,10 @@ function render() {
 
     // Look ahead to get curve direction for vanishing point shift
     var lookAhead = 0;
-    for (var la = 0; la < 40; la++) {
+    for (var la = 0; la < 30; la++) {
         lookAhead += segs[(baseSegIdx + la) % segs.length].curve;
     }
-    var vanishX = W / 2 + lookAhead * 8;
+    var vanishX = W / 2 + lookAhead * 10;
 
     for (var y = horizonY; y < roadH; y++) {
         var perspective = (y - horizonY) / (roadH - horizonY);
@@ -199,12 +199,15 @@ function render() {
             curveSum += segs[(baseSegIdx + c) % segs.length].curve;
         }
 
-        // Road center: interpolate from player position (bottom) toward vanishing point (horizon)
-        var roadCenterX = vanishX * (1 - perspective) + (W / 2) * perspective;
-        // Add curve displacement that increases with depth
-        roadCenterX += curveSum * perspective * 4;
+        // The key: curve offset is proportional to distance SQUARED
+        // This makes nearby road start to curve, not just the far end
+        var depth = 1 - perspective; // 0 at bottom, 1 at horizon
+        var curveOffset = curveSum * depth * depth * W * 0.012;
+        
+        // Road center: vanishing point pulls the horizon end, curve bends the middle
+        var roadCenterX = W / 2 + (vanishX - W/2) * depth + curveOffset;
         // Player lateral offset
-        roadCenterX -= playerX * 400 * perspective;
+        roadCenterX -= playerX * (W * 0.3) * perspective;
 
         // Road width at this depth
         var rw = roadW * perspective;
@@ -250,14 +253,14 @@ function render() {
         var screenY = horizonY + perspective * (roadH - horizonY);
         if (screenY < horizonY || screenY > roadH) continue;
 
-        // Curve offset for drone position
         var dSegIdx = Math.floor(d.z / segLen) % segs.length;
         var curveDist2 = dSegIdx - baseSegIdx; if (curveDist2 < 0) curveDist2 += segs.length;
         var curveSum2 = 0;
         for (var c = 0; c < Math.min(curveDist2, 80); c++) {
             curveSum2 += segs[(baseSegIdx + c) % segs.length].curve;
         }
-        var dScreenX = vanishX * (1 - perspective) + (W/2) * perspective + curveSum2 * perspective * 4 + (d.x - playerX) * 400 * perspective;
+        var depth = 1 - perspective;
+        var dScreenX = W/2 + (vanishX - W/2) * depth + curveSum2 * depth * depth * W * 0.012 + (d.x - playerX) * (W * 0.3) * perspective;
 
         var carW = 60 * perspective;
         var carH = 30 * perspective;
