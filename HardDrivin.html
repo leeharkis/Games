@@ -174,26 +174,24 @@ function render() {
     // Render road scanline by scanline from horizon to bottom
     var baseSegIdx = Math.floor(pos / segLen) % segs.length;
     var basePercent = (pos % segLen) / segLen;
-    var x = 0;
-    var dx = 0;
 
-    // We project each screen row to a world Z, then figure out road position
-    var prevX = W / 2;
-    var prevW = 0;
+    // Look ahead to get curve direction for vanishing point shift
+    var lookAhead = 0;
+    for (var la = 0; la < 40; la++) {
+        lookAhead += segs[(baseSegIdx + la) % segs.length].curve;
+    }
+    var vanishX = W / 2 + lookAhead * 8;
 
     for (var y = horizonY; y < roadH; y++) {
-        // Map screen y to a depth (z distance from camera)
-        var perspective = (y - horizonY) / (roadH - horizonY); // 0 at horizon, 1 at bottom
+        var perspective = (y - horizonY) / (roadH - horizonY);
         if (perspective < 0.001) continue;
-        var z = 10 / perspective; // world z units from camera
+        var z = 10 / perspective;
 
-        // Which segment is at this z?
         var worldZ = pos + z * segLen;
         var segIdx = Math.floor(worldZ / segLen) % segs.length;
         var seg = segs[segIdx];
 
-        // Accumulate curve displacement
-        // Approximate: sum curves from base to this segment
+        // Accumulate curve from camera to this point
         var curveDist = segIdx - baseSegIdx;
         if (curveDist < 0) curveDist += segs.length;
         var curveSum = 0;
@@ -201,8 +199,12 @@ function render() {
             curveSum += segs[(baseSegIdx + c) % segs.length].curve;
         }
 
-        // Road center X on screen
-        var roadCenterX = W / 2 + (curveSum * perspective * 3) - (playerX * 400 * perspective);
+        // Road center: interpolate from player position (bottom) toward vanishing point (horizon)
+        var roadCenterX = vanishX * (1 - perspective) + (W / 2) * perspective;
+        // Add curve displacement that increases with depth
+        roadCenterX += curveSum * perspective * 4;
+        // Player lateral offset
+        roadCenterX -= playerX * 400 * perspective;
 
         // Road width at this depth
         var rw = roadW * perspective;
@@ -255,7 +257,7 @@ function render() {
         for (var c = 0; c < Math.min(curveDist2, 80); c++) {
             curveSum2 += segs[(baseSegIdx + c) % segs.length].curve;
         }
-        var dScreenX = W/2 + (curveSum2 * perspective * 3) + (d.x - playerX) * 400 * perspective;
+        var dScreenX = vanishX * (1 - perspective) + (W/2) * perspective + curveSum2 * perspective * 4 + (d.x - playerX) * 400 * perspective;
 
         var carW = 60 * perspective;
         var carH = 30 * perspective;
