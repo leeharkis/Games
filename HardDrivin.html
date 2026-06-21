@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hard Drivin'</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#000;overflow:hidden;font-family:'Courier New',monospace}
+canvas{display:block;width:100vw;height:100vh}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<script>
+var cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+var W,H;
+function resize(){W=cv.width=window.innerWidth;H=cv.height=window.innerHeight;}
+resize();window.addEventListener('resize',resize);
+
+// Track definition - series of segments with curvature and elevation
+// Each segment: {curve, hill, length}
+var SEGMENT_LENGTH = 200;
+var ROAD_WIDTH = 2000;
+var LANE_COUNT = 2;
+var DRAW_DISTANCE = 150;
+var track = [];
+var trackLength;
+var totalSegments;
+
+function buildTrack() {
+    track = [];
+    // Straight start
+    addSegments(20, 0, 0);
+    // Gentle right
+    addSegments(15, 2, 0);
+    // Straight
+    addSegments(10, 0, 0);
+    // Hill up
+    addSegments(15, 0, 3);
+    // Hill crest
+    addSegments(5, 0, -1);
+    // Downhill
+    addSegments(15, 0, -3);
+    // Sharp left
+    addSegments(20, -3, 0);
+    // Straight with small bumps
+    addSegments(10, 0, 1);
+    addSegments(10, 0, -1);
+    // Gentle right uphill
+    addSegments(20, 1.5, 2);
+    // The big jump (stunt!)
+    addSegments(5, 0, 8);   // steep ramp up
+    addSegments(3, 0, 0);   // flat at top
+    addSegments(5, 0, -8);  // steep down
+    // S-curves
+    addSegments(15, 3, 0);
+    addSegments(15, -3, 0);
+    // Long straight (speed section)
+    addSegments(30, 0, 0);
+    // Banked curve
+    addSegments(25, 4, 1);
+    // Final approach
+    addSegments(15, -1, -1);
+    addSegments(15, 0, 0);
+    
+    totalSegments = track.length;
+    trackLength = totalSegments * SEGMENT_LENGTH;
+}
+
+function addSegments(count, curve, hill) {
+    for (var i = 0; i < count; i++) {
+        track.push({
+            index: track.length,
+            curve: curve,
+            y: (track.length > 0 ? track[track.length-1].y : 0) + hill * SEGMENT_LENGTH * 0.01,
+            clip: 0,
+            worldX: 0, worldY: 0, worldZ: 0,
+            screenX: 0, screenY: 0, screenW: 0, screenScale: 0
+        });
+    }
+}
+
+// Player
+var player = {
+    x: 0,          // lateral position (-1 to 1)
+    z: 0,          // distance along track
+    speed: 0,
+    maxSpeed: 320,
+    accel: 0,
+    steer: 0,
+    gear: 1,
+    rpm: 0
+};
+
+var keys = {};
+var lapTime = 0;
+var bestLap = null;
+var lapStart = 0;
+var laps = 0;
+var crashed = false;
+var crashTimer = 0;
+
+// Scenery objects
+var scenery = [];
+function generateScenery() {
+    scenery = [];
+    for (var i = 0; i < totalSegments; i += 3 + Math.floor(Math.random()*5)) {
+        var side = Math.random() < 0.5 ? -1 : 1;
+        var type = Math.random() < 0.5 ? 'tree' : 'post';
+        scenery.push({ segment: i, offset: side * (ROAD_WIDTH * 0.6 + Math.random() * 500), type: type });
+    }
+}
+
+// Other cars (drones)
+var drones = [];
+function spawnDrones() {
+    drones = [];
+    for (var i = 0; i < 5; i++) {
+        drones.push({
+            z: Math.floor(Math.random() * trackLength),
+            x: (Math.random() - 0.5) * 0.6,
+            speed: 150 + Math.random() * 80
+        });
+    }
+}
+
+document.addEventListener('keydown', function(e) { keys[e.code] = true; });
+document.addEventListener('keyup', function(e) { keys[e.code] = false; });
+
+function update(dt) {
+    if (crashed) {
+        crashTimer -= dt;
+        if (crashTimer <= 0) {
+            crashed = false;
+            player.speed = 0;
+        }
+        return;
+    }
+    
+    // Steering
+    var steerInput = 0;
+    if (keys['ArrowLeft'] || keys['KeyA']) steerInput = -1;
+    if (keys['ArrowRight'] || keys['KeyD']) steerInput = 1;
+    
+    // Accelerate / brake
+    if (keys['ArrowUp'] || keys['KeyW']) {
+        player.speed += 200 * dt;
+    } else if (keys['ArrowDown'] || keys['KeyS']) {
+        player.speed -= 400 * dt;
+    } else {
+        player.speed -= 50 * dt;
+    }
+    
+    player.speed = Math.max(0, Math.min(player.maxSpeed, player.speed));
+    
+    // Get current segment for curve
+    var segIndex = Math.floor(player.z / SEGMENT_LENGTH) % totalSegments;
+    var seg = track[segIndex];
+    
+    // Steering affected by speed
+    var steerAmount = steerInput * dt * 3 * (player.speed / player.maxSpeed);
+    // Curves push the car
+    var curvePush = seg.curve * dt * (player.speed / player.maxSpeed) * 0.004;
+    
+    player.x += steerAmount;
+    player.x -= curvePush;
+    
+    // Off-road penalty
+    if (Math.abs(player.x) > 0.8) {
+        player.speed *= 0.97;
+        if (Math.abs(player.x) > 1.2) {
+            // Crash!
+            crashed = true;
+            crashTimer = 2;
+            player.speed = 0;
+        }
+    }
+    
+    player.x = Math.max(-1.3, Math.min(1.3, player.x));
+    
+    // Move forward
+    player.z += player.speed * dt;
+    
+    // Lap detection
+    if (player.z >= trackLength) {
+        player.z -= trackLength;
+        laps++;
+        var lt = (Date.now() - lapStart) / 1000;
+        if (!bestLap || lt < bestLap) bestLap = lt;
+        lapStart = Date.now();
+    }
+    
+    // Collision with drones
+    for (var i = 0; i < drones.length; i++) {
+        var d = drones[i];
+        d.z += d.speed * dt;
+        if (d.z >= trackLength) d.z -= trackLength;
+        
+        var dz = Math.abs(d.z - player.z);
+        if (dz > trackLength / 2) dz = trackLength - dz;
+        if (dz < SEGMENT_LENGTH * 0.5 && Math.abs(d.x - player.x) < 0.25) {
+            crashed = true;
+            crashTimer = 2;
+            player.speed = 0;
+        }
+    }
+    
+    // RPM / gear simulation
+    player.gear = player.speed < 60 ? 1 : player.speed < 120 ? 2 : player.speed < 200 ? 3 : 4;
+    player.rpm = ((player.speed % 80) / 80) * 7000 + 1000;
+    
+    lapTime = (Date.now() - lapStart) / 1000;
+}
+
+function project(z, camZ, camY, x) {
+    var dz = z - camZ;
+    if (dz <= 0) dz = 0.001;
+    var scale = 300 / dz;
+    var projX = W / 2 + x * scale;
+    var projY = H * 0.55 - camY * scale;
+    var projW = ROAD_WIDTH * scale;
+    return { x: projX, y: projY, w: projW, scale: scale };
+}
+
+function render() {
+    // Sky
+    var skyGrad = ctx.createLinearGradient(0, 0, 0, H * 0.55);
+    skyGrad.addColorStop(0, '#1a1a60');
+    skyGrad.addColorStop(0.5, '#4080c0');
+    skyGrad.addColorStop(1, '#90c0e0');
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, W, H * 0.55);
+    
+    // Ground
+    ctx.fillStyle = '#2a5a1a';
+    ctx.fillRect(0, H * 0.55, W, H * 0.45);
+    
+    var baseSegment = Math.floor(player.z / SEGMENT_LENGTH);
+    var camZ = player.z;
+    var camY = 1500;
+    
+    // Get camera Y from track elevation
+    var curSeg = track[baseSegment % totalSegments];
+    camY += curSeg.y * 2000;
+    
+    var cumCurve = 0;
+    var x = 0;
+    
+    // Project segments from back to front
+    for (var n = 0; n < DRAW_DISTANCE; n++) {
+        var idx = (baseSegment + n) % totalSegments;
+        var seg = track[idx];
+        var segZ = (baseSegment + n) * SEGMENT_LENGTH;
+        
+        var relZ = segZ - camZ;
+        if (relZ <= 0) continue;
+        
+        var scale = 300 / relZ;
+        var projY = H * 0.55 - (seg.y * 2000 - camY + 1500) * scale;
+        var projW = ROAD_WIDTH * scale;
+        
+        x += cumCurve;
+        cumCurve += seg.curve * scale * 2;
+        
+        var projX = W / 2 + x * W * 0.5 - player.x * projW;
+        
+        seg.screenX = projX;
+        seg.screenY = projY;
+        seg.screenW = projW;
+        seg.screenScale = scale;
+        seg.worldZ = segZ;
+    }
+    
+    // Draw segments back to front
+    for (var n = DRAW_DISTANCE - 1; n > 0; n--) {
+        var idx = (baseSegment + n) % totalSegments;
+        var idx2 = (baseSegment + n - 1) % totalSegments;
+        var s1 = track[idx];
+        var s2 = track[idx2];
+        
+        if (!s1.screenScale || !s2.screenScale) continue;
+        
+        var dark = ((baseSegment + n) % 4 < 2);
+        
+        // Grass
+        var grassColor = dark ? '#1a5a1a' : '#2a6a2a';
+        drawTrapezoid(ctx, 0, s2.screenY, W, 0, s1.screenY, W, grassColor);
+        
+        // Road
+        var roadColor = dark ? '#444' : '#555';
+        drawTrapezoid(ctx,
+            s2.screenX - s2.screenW * 0.5, s2.screenY, s2.screenW,
+            s1.screenX - s1.screenW * 0.5, s1.screenY, s1.screenW,
+            roadColor);
+        
+        // Road edges (kerbs)
+        var kerbColor = dark ? '#cc0000' : '#ffffff';
+        var kw2 = s2.screenW * 0.02;
+        var kw1 = s1.screenW * 0.02;
+        drawTrapezoid(ctx,
+            s2.screenX - s2.screenW * 0.5 - kw2, s2.screenY, kw2 * 2,
+            s1.screenX - s1.screenW * 0.5 - kw1, s1.screenY, kw1 * 2,
+            kerbColor);
+        drawTrapezoid(ctx,
+            s2.screenX + s2.screenW * 0.5 - kw2, s2.screenY, kw2 * 2,
+            s1.screenX + s1.screenW * 0.5 - kw1, s1.screenY, kw1 * 2,
+            kerbColor);
+        
+        // Center line
+        if (!dark) {
+            var clw2 = s2.screenW * 0.005;
+            var clw1 = s1.screenW * 0.005;
+            drawTrapezoid(ctx,
+                s2.screenX - clw2, s2.screenY, clw2 * 2,
+                s1.screenX - clw1, s1.screenY, clw1 * 2,
+                '#fff');
+        }
+    }
+    
+    // Draw scenery
+    for (var i = 0; i < scenery.length; i++) {
+        var obj = scenery[i];
+        var segDist = obj.segment - baseSegment;
+        if (segDist < 0) segDist += totalSegments;
+        if (segDist > DRAW_DISTANCE || segDist < 1) continue;
+        
+        var seg = track[obj.segment % totalSegments];
+        if (!seg.screenScale) continue;
+        
+        var ox = seg.screenX + obj.offset * seg.screenScale;
+        var oy = seg.screenY;
+        var s = seg.screenScale * 800;
+        
+        if (obj.type === 'tree') {
+            ctx.fillStyle = '#3a2a10';
+            ctx.fillRect(ox - s*0.05, oy - s*0.6, s*0.1, s*0.6);
+            ctx.fillStyle = '#1a6a1a';
+            ctx.beginPath(); ctx.arc(ox, oy - s*0.7, s*0.2, 0, Math.PI*2); ctx.fill();
+        } else {
+            ctx.fillStyle = '#aaa';
+            ctx.fillRect(ox - s*0.02, oy - s*0.4, s*0.04, s*0.4);
+            ctx.fillStyle = '#f00';
+            ctx.fillRect(ox - s*0.04, oy - s*0.4, s*0.08, s*0.05);
+        }
+    }
+    
+    // Draw drones
+    for (var i = 0; i < drones.length; i++) {
+        var d = drones[i];
+        var dSegDist = Math.floor((d.z - player.z) / SEGMENT_LENGTH);
+        if (dSegDist < 0) dSegDist += totalSegments;
+        if (dSegDist >= DRAW_DISTANCE || dSegDist < 1) continue;
+        
+        var dSeg = track[(baseSegment + dSegDist) % totalSegments];
+        if (!dSeg.screenScale) continue;
+        
+        var dx = dSeg.screenX + (d.x - player.x) * dSeg.screenW;
+        var dy = dSeg.screenY;
+        var ds = dSeg.screenScale * 500;
+        
+        // Car body
+        ctx.fillStyle = '#c00';
+        ctx.fillRect(dx - ds*0.3, dy - ds*0.3, ds*0.6, ds*0.2);
+        ctx.fillStyle = '#800';
+        ctx.fillRect(dx - ds*0.25, dy - ds*0.5, ds*0.5, ds*0.2);
+        // Windshield
+        ctx.fillStyle = '#8cf';
+        ctx.fillRect(dx - ds*0.15, dy - ds*0.48, ds*0.3, ds*0.12);
+    }
+    
+    // Dashboard
+    drawDashboard();
+    
+    // Crash overlay
+    if (crashed) {
+        ctx.fillStyle = 'rgba(255,0,0,0.3)';
+        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 48px Courier New';
+        ctx.textAlign = 'center';
+        ctx.fillText('CRASH!', W/2, H/2);
+    }
+}
+
+function drawTrapezoid(ctx, x1, y1, w1, x2, y2, w2, color) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x1 + w1, y1);
+    ctx.lineTo(x2 + w2, y2);
+    ctx.lineTo(x2, y2);
+    ctx.closePath();
+    ctx.fill();
+}
+
+function drawDashboard() {
+    // Dashboard panel
+    var dh = H * 0.18;
+    var dy = H - dh;
+    ctx.fillStyle = '#222';
+    ctx.fillRect(0, dy, W, dh);
+    ctx.strokeStyle = '#444';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(0, dy, W, dh);
+    
+    // Speed
+    var mph = Math.floor(player.speed);
+    ctx.fillStyle = '#0f0';
+    ctx.font = 'bold ' + Math.floor(dh*0.4) + 'px Courier New';
+    ctx.textAlign = 'left';
+    ctx.fillText(mph + ' MPH', 20, dy + dh * 0.55);
+    
+    // Gear
+    ctx.fillStyle = '#ff0';
+    ctx.font = 'bold ' + Math.floor(dh*0.3) + 'px Courier New';
+    ctx.fillText('GEAR: ' + player.gear, 20, dy + dh * 0.85);
+    
+    // RPM bar
+    var barX = W * 0.3;
+    var barW = W * 0.35;
+    var barH = dh * 0.2;
+    ctx.fillStyle = '#333';
+    ctx.fillRect(barX, dy + dh * 0.3, barW, barH);
+    var rpmFill = player.rpm / 8000;
+    ctx.fillStyle = rpmFill > 0.8 ? '#f00' : '#0f0';
+    ctx.fillRect(barX, dy + dh * 0.3, barW * rpmFill, barH);
+    ctx.fillStyle = '#fff';
+    ctx.font = Math.floor(dh*0.2) + 'px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText('RPM', barX + barW/2, dy + dh * 0.25);
+    
+    // Lap info
+    ctx.fillStyle = '#fff';
+    ctx.font = Math.floor(dh * 0.3) + 'px Courier New';
+    ctx.textAlign = 'right';
+    ctx.fillText('LAP: ' + laps, W - 20, dy + dh * 0.4);
+    ctx.fillText('TIME: ' + lapTime.toFixed(1) + 's', W - 20, dy + dh * 0.65);
+    if (bestLap) {
+        ctx.fillStyle = '#0f0';
+        ctx.fillText('BEST: ' + bestLap.toFixed(1) + 's', W - 20, dy + dh * 0.9);
+    }
+    
+    // Steering wheel indicator
+    var swX = W * 0.5;
+    var swY = dy + dh * 0.7;
+    var swR = dh * 0.25;
+    ctx.strokeStyle = '#888';
+    ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(swX, swY, swR, 0, Math.PI * 2); ctx.stroke();
+    // Indicator
+    var steerAngle = -player.x * 0.5;
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(swX, swY);
+    ctx.lineTo(swX + Math.sin(steerAngle) * swR, swY - Math.cos(steerAngle) * swR);
+    ctx.stroke();
+    
+    // Controls
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.font = '12px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText('W/↑:Gas  S/↓:Brake  A/←:Left  D/→:Right', W/2, dy - 5);
+}
+
+// Game loop
+var lastTime = 0;
+function frame(time) {
+    var dt = Math.min((time - lastTime) / 1000, 0.05);
+    lastTime = time;
+    update(dt);
+    render();
+    requestAnimationFrame(frame);
+}
+
+buildTrack();
+generateScenery();
+spawnDrones();
+lapStart = Date.now();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
