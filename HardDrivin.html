@@ -36,23 +36,23 @@ function addRoad(count, curve, y) {
 function buildTrack() {
     segments = [];
     addRoad(30, 0, 0);       // straight
-    addRoad(20, 3, 0);       // right curve
+    addRoad(20, 5, 0);       // right curve
     addRoad(15, 0, 0);       // straight
     addRoad(10, 0, 30);      // uphill
     addRoad(5, 0, -10);      // crest
     addRoad(10, 0, -30);     // downhill
-    addRoad(20, -4, 0);      // left curve
+    addRoad(20, -6, 0);      // left curve
     addRoad(10, 0, 0);       // straight
-    addRoad(15, 2, 0);       // gentle right
+    addRoad(15, 4, 0);       // gentle right
     addRoad(8, 0, 50);       // jump ramp up
     addRoad(4, 0, 0);        // air
     addRoad(8, 0, -50);      // land down
-    addRoad(15, -3, 0);      // left
-    addRoad(15, 3, 0);       // right (S-curve)
+    addRoad(15, -5, 0);      // left
+    addRoad(15, 5, 0);       // right (S-curve)
     addRoad(25, 0, 0);       // long straight
-    addRoad(20, 5, 0);       // sharp right
+    addRoad(20, 8, 0);       // sharp right
     addRoad(10, 0, 0);       // straight
-    addRoad(15, -2, 0);      // gentle left
+    addRoad(15, -4, 0);      // gentle left
     addRoad(10, 0, 0);       // finish straight
     
     totalLength = segments.length * SEG_LEN;
@@ -183,76 +183,81 @@ function update(dt) {
 // RENDER
 // ==========================
 function render() {
-    // Sky
+    // Sky - top half only
     var skyG = ctx.createLinearGradient(0, 0, 0, H * 0.4);
     skyG.addColorStop(0, '#1a1a50');
-    skyG.addColorStop(1, '#80b0e0');
+    skyG.addColorStop(1, '#6090c0');
     ctx.fillStyle = skyG;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(0, 0, W, H * 0.4);
+    
+    // Fill entire bottom with grass so no blue shows
+    ctx.fillStyle = '#1a5a1a';
+    ctx.fillRect(0, H * 0.4, W, H * 0.6);
     
     var baseIdx = Math.floor(playerZ / SEG_LEN) % segments.length;
-    var baseOffset = (playerZ % SEG_LEN) / SEG_LEN; // how far into current segment
+    var baseOffset = (playerZ % SEG_LEN) / SEG_LEN;
     
-    // Camera height from road
-    var camHeight = 400;
-    var baseSeg = segments[baseIdx];
-    camHeight += baseSeg.y * baseOffset * 0.5;
+    var camHeight = 500;
     
-    // Store projected positions for each segment
+    // Project all segments
     var projected = [];
-    var dx = 0;
+    var curveAccum = 0;
     
     for (var n = 0; n < 200; n++) {
         var idx = (baseIdx + n) % segments.length;
         var seg = segments[idx];
         
-        // Cumulative curve offset — stronger effect
-        dx += seg.curve * 0.15;
-        
         // Z distance from camera
         var z = (n - baseOffset) * SEG_LEN;
         if (z <= 0) { projected.push(null); continue; }
         
-        // Camera-relative Y (elevation)
-        var segY = seg.y * n * 0.01;
+        // Accumulate curve - this is what makes the road bend
+        curveAccum += seg.curve;
         
-        // Perspective projection
-        var scale = 120 / z;
-        var projY = H * 0.38 - (segY - camHeight * 0.01) * scale * 20;
-        var projX = W / 2 + (dx * scale * W * 0.004 - playerX * ROAD_W * scale);
-        var projW = ROAD_W * scale;
+        // Perspective
+        var scale = 150 / z;
         
-        projected.push({ x: projX, y: projY, w: projW, scale: scale, idx: idx });
+        // Screen X: offset by accumulated curve, and by player lateral position
+        var screenX = W / 2 + (curveAccum * scale * 2) - (playerX * ROAD_W * scale);
+        
+        // Screen Y: base horizon + height
+        var elevY = seg.y * n * 0.005;
+        var screenY = H * 0.4 + (camHeight * 0.001 - elevY) * scale * -100 + scale * 50;
+        
+        var screenW = ROAD_W * scale;
+        
+        projected.push({ x: screenX, y: screenY, w: screenW, scale: scale });
     }
     
-    // Draw from back to front
-    for (var n = 199; n > 2; n--) {
+    // Draw from back to front (skip first 3 to avoid close flicker)
+    for (var n = 199; n > 3; n--) {
         var p1 = projected[n];
         var p2 = projected[n - 1];
         if (!p1 || !p2) continue;
-        if (p1.y < 0 && p2.y < 0) continue;
-        if (p2.y > H) continue;
+        if (p1.y > H || p2.y < 0) continue;
         
-        var dark = ((baseIdx + n) % 6 < 3);
+        var stripe = ((baseIdx + n) % 6 < 3);
         
-        // Grass
-        var grassCol = dark ? '#1a5a1a' : '#2a7a2a';
+        // Grass strips
+        var grassCol = stripe ? '#1a5a1a' : '#2a6a2a';
         ctx.fillStyle = grassCol;
-        ctx.fillRect(0, p1.y, W, p2.y - p1.y + 1);
+        var minY = Math.min(p1.y, p2.y);
+        var maxY = Math.max(p1.y, p2.y) + 1;
+        ctx.fillRect(0, minY, W, maxY - minY);
         
         // Road
-        var roadCol = dark ? '#444' : '#555';
+        var roadCol = stripe ? '#3a3a3a' : '#4a4a4a';
         drawQuad(p1.x - p1.w, p1.y, p1.w * 2, p2.x - p2.w, p2.y, p2.w * 2, roadCol);
         
         // Kerbs
-        var kerbCol = dark ? '#ff0000' : '#ffffff';
-        var kw1 = p1.w * 0.06, kw2 = p2.w * 0.06;
-        drawQuad(p1.x - p1.w - kw1, p1.y, kw1, p2.x - p2.w - kw2, p2.y, kw2, kerbCol);
-        drawQuad(p1.x + p1.w, p1.y, kw1, p2.x + p2.w, p2.y, kw2, kerbCol);
+        var kerbCol = stripe ? '#cc0000' : '#ffffff';
+        var kw1 = p1.w * 0.05, kw2 = p2.w * 0.05;
+        drawQuad(p1.x - p1.w - kw1, p1.y, kw1 * 2, p2.x - p2.w - kw2, p2.y, kw2 * 2, kerbCol);
+        drawQuad(p1.x + p1.w, p1.y, kw1 * 2, p2.x + p2.w, p2.y, kw2 * 2, kerbCol);
         
-        // Center dashes
-        if (!dark) {
-            var cw1 = p1.w * 0.02, cw2 = p2.w * 0.02;
+        // Center line dashes
+        if (!stripe) {
+            var cw1 = p1.w * 0.015, cw2 = p2.w * 0.015;
             drawQuad(p1.x - cw1, p1.y, cw1 * 2, p2.x - cw2, p2.y, cw2 * 2, '#ffffff');
         }
     }
@@ -263,7 +268,7 @@ function render() {
         var dz = d.z - playerZ;
         if (dz < 0) dz += totalLength;
         var dSegN = Math.floor(dz / SEG_LEN);
-        if (dSegN < 1 || dSegN >= 199) continue;
+        if (dSegN < 4 || dSegN >= 199) continue;
         
         var p = projected[dSegN];
         if (!p) continue;
@@ -274,13 +279,13 @@ function render() {
         
         if (carS < 2 || carY < 0 || carY > H) continue;
         
-        // Simple car shape
+        // Car drawn sitting on road
         ctx.fillStyle = '#cc2200';
-        ctx.fillRect(carX - carS * 0.5, carY - carS * 0.5, carS, carS * 0.35);
+        ctx.fillRect(carX - carS * 0.5, carY - carS * 0.4, carS, carS * 0.3);
         ctx.fillStyle = '#881100';
-        ctx.fillRect(carX - carS * 0.35, carY - carS * 0.8, carS * 0.7, carS * 0.35);
+        ctx.fillRect(carX - carS * 0.35, carY - carS * 0.65, carS * 0.7, carS * 0.28);
         ctx.fillStyle = '#88ccff';
-        ctx.fillRect(carX - carS * 0.2, carY - carS * 0.75, carS * 0.4, carS * 0.2);
+        ctx.fillRect(carX - carS * 0.2, carY - carS * 0.6, carS * 0.4, carS * 0.15);
     }
     
     // Dashboard
@@ -293,9 +298,9 @@ function render() {
         ctx.fillStyle = '#fff';
         ctx.font = 'bold 60px Courier New';
         ctx.textAlign = 'center';
-        ctx.fillText('CRASH!', W / 2, H / 2);
+        ctx.fillText('CRASH!', W / 2, H * 0.35);
         ctx.font = '20px Courier New';
-        ctx.fillText('Returning to road...', W / 2, H / 2 + 40);
+        ctx.fillText('Returning to road...', W / 2, H * 0.35 + 40);
     }
 }
 
