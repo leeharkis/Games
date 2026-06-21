@@ -104,8 +104,15 @@ function update(dt) {
         if (crashTimer <= 0) {
             crashed = false;
             speed = 0;
-            // Put back on road
+            // Put back on road centre and push drones away
             playerX = 0;
+            for (var i = 0; i < drones.length; i++) {
+                var dz = drones[i].z - playerZ;
+                if (dz < 0) dz += totalLength;
+                if (dz < SEG_LEN * 10) {
+                    drones[i].z = (playerZ + SEG_LEN * 30) % totalLength;
+                }
+            }
         }
         return;
     }
@@ -177,7 +184,7 @@ function update(dt) {
 // ==========================
 function render() {
     // Sky
-    var skyG = ctx.createLinearGradient(0, 0, 0, H * 0.5);
+    var skyG = ctx.createLinearGradient(0, 0, 0, H * 0.4);
     skyG.addColorStop(0, '#1a1a50');
     skyG.addColorStop(1, '#80b0e0');
     ctx.fillStyle = skyG;
@@ -187,22 +194,20 @@ function render() {
     var baseOffset = (playerZ % SEG_LEN) / SEG_LEN; // how far into current segment
     
     // Camera height from road
-    var camHeight = 250;
+    var camHeight = 400;
     var baseSeg = segments[baseIdx];
     camHeight += baseSeg.y * baseOffset * 0.5;
     
     // Store projected positions for each segment
     var projected = [];
-    var x = 0;
     var dx = 0;
-    var maxy = H; // clip below this
     
     for (var n = 0; n < 200; n++) {
         var idx = (baseIdx + n) % segments.length;
         var seg = segments[idx];
         
-        // Cumulative curve offset
-        dx += seg.curve;
+        // Cumulative curve offset — stronger effect
+        dx += seg.curve * 0.15;
         
         // Z distance from camera
         var z = (n - baseOffset) * SEG_LEN;
@@ -213,21 +218,22 @@ function render() {
         
         // Perspective projection
         var scale = 120 / z;
-        var projY = H * 0.45 - (segY - camHeight * 0.01) * scale * 20;
-        var projX = W / 2 + (dx * scale * 0.8 - playerX * ROAD_W * scale);
+        var projY = H * 0.38 - (segY - camHeight * 0.01) * scale * 20;
+        var projX = W / 2 + (dx * scale * W * 0.004 - playerX * ROAD_W * scale);
         var projW = ROAD_W * scale;
         
         projected.push({ x: projX, y: projY, w: projW, scale: scale, idx: idx });
     }
     
     // Draw from back to front
-    for (var n = 199; n > 0; n--) {
+    for (var n = 199; n > 2; n--) {
         var p1 = projected[n];
         var p2 = projected[n - 1];
         if (!p1 || !p2) continue;
         if (p1.y < 0 && p2.y < 0) continue;
+        if (p2.y > H) continue;
         
-        var dark = ((baseIdx + n) % 4 < 2);
+        var dark = ((baseIdx + n) % 6 < 3);
         
         // Grass
         var grassCol = dark ? '#1a5a1a' : '#2a7a2a';
