@@ -22,8 +22,8 @@ window.addEventListener('resize', resize);
 // ==========================
 // TRACK
 // ==========================
-var SEG_LEN = 200;      // length of each segment in world units
-var ROAD_W = 2000;      // half-width of road
+var SEG_LEN = 50;       // length of each segment in world units
+var ROAD_W = 500;      // half-width of road
 var segments = [];
 var totalLength;
 
@@ -165,7 +165,7 @@ function update(dt) {
         // Collision
         var dz = d.z - playerZ;
         if (dz < 0) dz += totalLength;
-        if (dz < SEG_LEN * 0.4 && Math.abs(d.x - playerX) < 0.2) {
+        if (dz < SEG_LEN * 1.5 && Math.abs(d.x - playerX) < 0.25) {
             crashed = true;
             crashTimer = 1.5;
         }
@@ -187,7 +187,7 @@ function render() {
     var baseOffset = (playerZ % SEG_LEN) / SEG_LEN; // how far into current segment
     
     // Camera height from road
-    var camHeight = 1000;
+    var camHeight = 250;
     var baseSeg = segments[baseIdx];
     camHeight += baseSeg.y * baseOffset * 0.5;
     
@@ -197,7 +197,7 @@ function render() {
     var dx = 0;
     var maxy = H; // clip below this
     
-    for (var n = 0; n < 120; n++) {
+    for (var n = 0; n < 200; n++) {
         var idx = (baseIdx + n) % segments.length;
         var seg = segments[idx];
         
@@ -212,16 +212,16 @@ function render() {
         var segY = seg.y * n * 0.01;
         
         // Perspective projection
-        var scale = 300 / z;
-        var projY = H * 0.45 - (segY - camHeight * 0.01) * scale * 50;
-        var projX = W / 2 + (dx * scale * 1.5 - playerX * ROAD_W * scale) ;
+        var scale = 120 / z;
+        var projY = H * 0.45 - (segY - camHeight * 0.01) * scale * 20;
+        var projX = W / 2 + (dx * scale * 0.8 - playerX * ROAD_W * scale);
         var projW = ROAD_W * scale;
         
         projected.push({ x: projX, y: projY, w: projW, scale: scale, idx: idx });
     }
     
     // Draw from back to front
-    for (var n = 119; n > 0; n--) {
+    for (var n = 199; n > 0; n--) {
         var p1 = projected[n];
         var p2 = projected[n - 1];
         if (!p1 || !p2) continue;
@@ -257,14 +257,14 @@ function render() {
         var dz = d.z - playerZ;
         if (dz < 0) dz += totalLength;
         var dSegN = Math.floor(dz / SEG_LEN);
-        if (dSegN < 1 || dSegN >= 119) continue;
+        if (dSegN < 1 || dSegN >= 199) continue;
         
         var p = projected[dSegN];
         if (!p) continue;
         
         var carX = p.x + (d.x - playerX) * p.w;
         var carY = p.y;
-        var carS = p.scale * 400;
+        var carS = p.scale * 150;
         
         if (carS < 2 || carY < 0 || carY > H) continue;
         
