@@ -20,51 +20,55 @@ resize();
 window.addEventListener('resize', resize);
 
 // ==========================
-// TRACK
+// TRACK - each segment has a z position, curve, and y (height)
 // ==========================
-var SEG_LEN = 50;       // length of each segment in world units
-var ROAD_W = 500;      // half-width of road
-var segments = [];
-var totalLength;
+var segLen = 100;
+var roadW = 1200;
+var segs = [];
+var trackLen;
 
-function addRoad(count, curve, y) {
-    for (var i = 0; i < count; i++) {
-        segments.push({ curve: curve, y: y });
+function addSegs(n, curve, hill) {
+    for (var i = 0; i < n; i++) {
+        var prevY = segs.length > 0 ? segs[segs.length - 1].worldY : 0;
+        segs.push({
+            worldY: prevY + hill,
+            curve: curve,
+            worldZ: segs.length * segLen
+        });
     }
 }
 
 function buildTrack() {
-    segments = [];
-    addRoad(30, 0, 0);       // straight
-    addRoad(20, 5, 0);       // right curve
-    addRoad(15, 0, 0);       // straight
-    addRoad(10, 0, 30);      // uphill
-    addRoad(5, 0, -10);      // crest
-    addRoad(10, 0, -30);     // downhill
-    addRoad(20, -6, 0);      // left curve
-    addRoad(10, 0, 0);       // straight
-    addRoad(15, 4, 0);       // gentle right
-    addRoad(8, 0, 50);       // jump ramp up
-    addRoad(4, 0, 0);        // air
-    addRoad(8, 0, -50);      // land down
-    addRoad(15, -5, 0);      // left
-    addRoad(15, 5, 0);       // right (S-curve)
-    addRoad(25, 0, 0);       // long straight
-    addRoad(20, 8, 0);       // sharp right
-    addRoad(10, 0, 0);       // straight
-    addRoad(15, -4, 0);      // gentle left
-    addRoad(10, 0, 0);       // finish straight
-    
-    totalLength = segments.length * SEG_LEN;
+    segs = [];
+    addSegs(40, 0, 0);
+    addSegs(30, 3, 0);
+    addSegs(20, 0, 0);
+    addSegs(20, 0, 20);
+    addSegs(10, 0, -5);
+    addSegs(20, 0, -20);
+    addSegs(30, -4, 0);
+    addSegs(20, 0, 0);
+    addSegs(25, 2, 0);
+    addSegs(10, 0, 40);
+    addSegs(5, 0, 0);
+    addSegs(10, 0, -40);
+    addSegs(25, -3, 0);
+    addSegs(25, 4, 0);
+    addSegs(40, 0, 0);
+    addSegs(30, 5, 0);
+    addSegs(20, 0, 0);
+    addSegs(25, -3, 0);
+    addSegs(20, 0, 0);
+    trackLen = segs.length * segLen;
 }
 
 // ==========================
-// PLAYER
+// GAME STATE
 // ==========================
-var playerX = 0;       // -1 to 1 across road
-var playerZ = 0;       // distance along track
+var pos = 0;        // z position along track
+var playerX = 0;    // -1 to 1
 var speed = 0;
-var maxSpeed = 300;
+var maxSpeed = 14000;
 
 var crashed = false;
 var crashTimer = 0;
@@ -73,24 +77,18 @@ var bestLap = null;
 var lapStart = 0;
 var laps = 0;
 
-// ==========================
-// DRONES (other cars)
-// ==========================
 var drones = [];
 function spawnDrones() {
     drones = [];
     for (var i = 0; i < 4; i++) {
         drones.push({
-            z: (i + 1) * Math.floor(totalLength / 5),
+            z: (i + 1) * Math.floor(trackLen / 5),
             x: (Math.random() - 0.5) * 0.5,
-            speed: 120 + Math.random() * 60
+            speed: 5000 + Math.random() * 3000
         });
     }
 }
 
-// ==========================
-// INPUT
-// ==========================
 var keys = {};
 document.addEventListener('keydown', function(e) { keys[e.code] = true; });
 document.addEventListener('keyup', function(e) { keys[e.code] = false; });
@@ -104,268 +102,213 @@ function update(dt) {
         if (crashTimer <= 0) {
             crashed = false;
             speed = 0;
-            // Put back on road centre and push drones away
             playerX = 0;
             for (var i = 0; i < drones.length; i++) {
-                var dz = drones[i].z - playerZ;
-                if (dz < 0) dz += totalLength;
-                if (dz < SEG_LEN * 10) {
-                    drones[i].z = (playerZ + SEG_LEN * 30) % totalLength;
-                }
+                var dz = drones[i].z - pos;
+                if (dz < 0) dz += trackLen;
+                if (dz < segLen * 20) drones[i].z = (pos + segLen * 50) % trackLen;
             }
         }
         return;
     }
-    
-    // Accelerate / brake
-    if (keys['ArrowUp'] || keys['KeyW']) {
-        speed += 150 * dt;
-    } else if (keys['ArrowDown'] || keys['KeyS']) {
-        speed -= 300 * dt;
-    } else {
-        speed -= 40 * dt; // coast friction
-    }
+
+    if (keys['ArrowUp'] || keys['KeyW']) speed += 10000 * dt;
+    else if (keys['ArrowDown'] || keys['KeyS']) speed -= 20000 * dt;
+    else speed -= 3000 * dt;
     speed = Math.max(0, Math.min(maxSpeed, speed));
-    
-    // Steer
+
     var steer = 0;
     if (keys['ArrowLeft'] || keys['KeyA']) steer = -1;
     if (keys['ArrowRight'] || keys['KeyD']) steer = 1;
-    
-    playerX += steer * dt * 2.5;
-    
-    // Road curvature pushes car
-    var segIdx = Math.floor(playerZ / SEG_LEN) % segments.length;
-    var seg = segments[segIdx];
-    playerX += seg.curve * (speed / maxSpeed) * dt * 0.3;
-    
-    // Off-road
-    if (Math.abs(playerX) > 1.0) {
-        speed *= 0.95; // slow down off-road
-    }
-    if (Math.abs(playerX) > 1.5) {
-        crashed = true;
-        crashTimer = 1.5;
-        return;
-    }
-    
-    // Move forward
-    playerZ += speed * dt;
-    
-    // Lap
-    if (playerZ >= totalLength) {
-        playerZ -= totalLength;
+    playerX += steer * dt * 3;
+
+    // Centrifugal force from curves
+    var segIdx = Math.floor(pos / segLen) % segs.length;
+    playerX += segs[segIdx].curve * (speed / maxSpeed) * dt * 0.6;
+
+    // Off road
+    if (Math.abs(playerX) > 1) speed *= (1 - dt * 2);
+    if (Math.abs(playerX) > 1.8) { crashed = true; crashTimer = 1.5; return; }
+    playerX = Math.max(-2, Math.min(2, playerX));
+
+    pos += speed * dt;
+    if (pos >= trackLen) {
+        pos -= trackLen;
         laps++;
         var lt = (Date.now() - lapStart) / 1000;
         if (!bestLap || lt < bestLap) bestLap = lt;
         lapStart = Date.now();
     }
-    
     lapTime = (Date.now() - lapStart) / 1000;
-    
-    // Update drones
+
+    // Drones
     for (var i = 0; i < drones.length; i++) {
         var d = drones[i];
         d.z += d.speed * dt;
-        if (d.z >= totalLength) d.z -= totalLength;
-        
-        // Collision
-        var dz = d.z - playerZ;
-        if (dz < 0) dz += totalLength;
-        if (dz < SEG_LEN * 1.5 && Math.abs(d.x - playerX) < 0.25) {
-            crashed = true;
-            crashTimer = 1.5;
+        if (d.z >= trackLen) d.z -= trackLen;
+        var dz = d.z - pos; if (dz < 0) dz += trackLen;
+        if (dz < segLen * 2 && Math.abs(d.x - playerX) < 0.3) {
+            crashed = true; crashTimer = 1.5;
         }
     }
 }
 
 // ==========================
-// RENDER
+// RENDER - scanline-based pseudo-3D
 // ==========================
 function render() {
-    // Sky - top half only
-    var skyG = ctx.createLinearGradient(0, 0, 0, H * 0.4);
-    skyG.addColorStop(0, '#1a1a50');
-    skyG.addColorStop(1, '#6090c0');
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    var dashH = Math.floor(H * 0.14);
+    var roadH = H - dashH;
+    var horizonY = Math.floor(roadH * 0.4);
+
+    // Sky
+    var skyG = ctx.createLinearGradient(0, 0, 0, horizonY);
+    skyG.addColorStop(0, '#0a0a30');
+    skyG.addColorStop(1, '#5080b0');
     ctx.fillStyle = skyG;
-    ctx.fillRect(0, 0, W, H * 0.4);
-    
-    // Fill entire bottom with grass so no blue shows
-    ctx.fillStyle = '#1a5a1a';
-    ctx.fillRect(0, H * 0.4, W, H * 0.6);
-    
-    var baseIdx = Math.floor(playerZ / SEG_LEN) % segments.length;
-    var baseOffset = (playerZ % SEG_LEN) / SEG_LEN;
-    
-    var camHeight = 500;
-    
-    // Project all segments
-    var projected = [];
-    var curveAccum = 0;
-    
-    for (var n = 0; n < 200; n++) {
-        var idx = (baseIdx + n) % segments.length;
-        var seg = segments[idx];
-        
-        // Z distance from camera
-        var z = (n - baseOffset) * SEG_LEN;
-        if (z <= 0) { projected.push(null); continue; }
-        
-        // Accumulate curve - this is what makes the road bend
-        curveAccum += seg.curve;
-        
-        // Perspective
-        var scale = 150 / z;
-        
-        // Screen X: offset by accumulated curve, and by player lateral position
-        var screenX = W / 2 + (curveAccum * scale * 2) - (playerX * ROAD_W * scale);
-        
-        // Screen Y: base horizon + height
-        var elevY = seg.y * n * 0.005;
-        var screenY = H * 0.4 + (camHeight * 0.001 - elevY) * scale * -100 + scale * 50;
-        
-        var screenW = ROAD_W * scale;
-        
-        projected.push({ x: screenX, y: screenY, w: screenW, scale: scale });
-    }
-    
-    // Draw from back to front (skip first 3 to avoid close flicker)
-    for (var n = 199; n > 3; n--) {
-        var p1 = projected[n];
-        var p2 = projected[n - 1];
-        if (!p1 || !p2) continue;
-        if (p1.y > H || p2.y < 0) continue;
-        
-        var stripe = ((baseIdx + n) % 6 < 3);
-        
-        // Grass strips
-        var grassCol = stripe ? '#1a5a1a' : '#2a6a2a';
-        ctx.fillStyle = grassCol;
-        var minY = Math.min(p1.y, p2.y);
-        var maxY = Math.max(p1.y, p2.y) + 1;
-        ctx.fillRect(0, minY, W, maxY - minY);
-        
-        // Road
-        var roadCol = stripe ? '#3a3a3a' : '#4a4a4a';
-        drawQuad(p1.x - p1.w, p1.y, p1.w * 2, p2.x - p2.w, p2.y, p2.w * 2, roadCol);
-        
+    ctx.fillRect(0, 0, W, horizonY);
+
+    // Render road scanline by scanline from horizon to bottom
+    var baseSegIdx = Math.floor(pos / segLen) % segs.length;
+    var basePercent = (pos % segLen) / segLen;
+    var x = 0;
+    var dx = 0;
+
+    // We project each screen row to a world Z, then figure out road position
+    var prevX = W / 2;
+    var prevW = 0;
+
+    for (var y = horizonY; y < roadH; y++) {
+        // Map screen y to a depth (z distance from camera)
+        var perspective = (y - horizonY) / (roadH - horizonY); // 0 at horizon, 1 at bottom
+        if (perspective < 0.001) continue;
+        var z = 10 / perspective; // world z units from camera
+
+        // Which segment is at this z?
+        var worldZ = pos + z * segLen;
+        var segIdx = Math.floor(worldZ / segLen) % segs.length;
+        var seg = segs[segIdx];
+
+        // Accumulate curve displacement
+        // Approximate: sum curves from base to this segment
+        var curveDist = segIdx - baseSegIdx;
+        if (curveDist < 0) curveDist += segs.length;
+        var curveSum = 0;
+        for (var c = 0; c < Math.min(curveDist, 80); c++) {
+            curveSum += segs[(baseSegIdx + c) % segs.length].curve;
+        }
+
+        // Road center X on screen
+        var roadCenterX = W / 2 + (curveSum * perspective * 3) - (playerX * 400 * perspective);
+
+        // Road width at this depth
+        var rw = roadW * perspective;
+
+        // Elevation
+        var elev = (seg.worldY - segs[baseSegIdx].worldY) * perspective * 0.3;
+
+        var drawY = y - elev;
+        if (drawY < horizonY || drawY >= roadH) continue;
+
+        // Stripe pattern
+        var stripe = (segIdx % 6 < 3);
+
+        // Grass
+        ctx.fillStyle = stripe ? '#1a6a1a' : '#2a7a2a';
+        ctx.fillRect(0, drawY, W, 1);
+
+        // Road surface
+        ctx.fillStyle = stripe ? '#3a3a3a' : '#4a4a4a';
+        ctx.fillRect(roadCenterX - rw / 2, drawY, rw, 1);
+
         // Kerbs
-        var kerbCol = stripe ? '#cc0000' : '#ffffff';
-        var kw1 = p1.w * 0.05, kw2 = p2.w * 0.05;
-        drawQuad(p1.x - p1.w - kw1, p1.y, kw1 * 2, p2.x - p2.w - kw2, p2.y, kw2 * 2, kerbCol);
-        drawQuad(p1.x + p1.w, p1.y, kw1 * 2, p2.x + p2.w, p2.y, kw2 * 2, kerbCol);
-        
-        // Center line dashes
+        var kw = rw * 0.04;
+        ctx.fillStyle = stripe ? '#cc0000' : '#ffffff';
+        ctx.fillRect(roadCenterX - rw / 2 - kw, drawY, kw, 1);
+        ctx.fillRect(roadCenterX + rw / 2, drawY, kw, 1);
+
+        // Center line
         if (!stripe) {
-            var cw1 = p1.w * 0.015, cw2 = p2.w * 0.015;
-            drawQuad(p1.x - cw1, p1.y, cw1 * 2, p2.x - cw2, p2.y, cw2 * 2, '#ffffff');
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(roadCenterX - 2, drawY, 4, 1);
         }
     }
-    
+
     // Draw drones
     for (var i = 0; i < drones.length; i++) {
         var d = drones[i];
-        var dz = d.z - playerZ;
-        if (dz < 0) dz += totalLength;
-        var dSegN = Math.floor(dz / SEG_LEN);
-        if (dSegN < 4 || dSegN >= 199) continue;
-        
-        var p = projected[dSegN];
-        if (!p) continue;
-        
-        var carX = p.x + (d.x - playerX) * p.w;
-        var carY = p.y;
-        var carS = p.scale * 150;
-        
-        if (carS < 2 || carY < 0 || carY > H) continue;
-        
-        // Car drawn sitting on road
+        var dz = d.z - pos; if (dz < 0) dz += trackLen;
+        var dDepth = dz / segLen;
+        if (dDepth < 1 || dDepth > 80) continue;
+
+        var perspective = 10 / dDepth;
+        var screenY = horizonY + perspective * (roadH - horizonY);
+        if (screenY < horizonY || screenY > roadH) continue;
+
+        // Curve offset for drone position
+        var dSegIdx = Math.floor(d.z / segLen) % segs.length;
+        var curveDist2 = dSegIdx - baseSegIdx; if (curveDist2 < 0) curveDist2 += segs.length;
+        var curveSum2 = 0;
+        for (var c = 0; c < Math.min(curveDist2, 80); c++) {
+            curveSum2 += segs[(baseSegIdx + c) % segs.length].curve;
+        }
+        var dScreenX = W/2 + (curveSum2 * perspective * 3) + (d.x - playerX) * 400 * perspective;
+
+        var carW = 60 * perspective;
+        var carH = 30 * perspective;
+        if (carW < 4) continue;
+
         ctx.fillStyle = '#cc2200';
-        ctx.fillRect(carX - carS * 0.5, carY - carS * 0.4, carS, carS * 0.3);
-        ctx.fillStyle = '#881100';
-        ctx.fillRect(carX - carS * 0.35, carY - carS * 0.65, carS * 0.7, carS * 0.28);
-        ctx.fillStyle = '#88ccff';
-        ctx.fillRect(carX - carS * 0.2, carY - carS * 0.6, carS * 0.4, carS * 0.15);
+        ctx.fillRect(dScreenX - carW/2, screenY - carH, carW, carH * 0.6);
+        ctx.fillStyle = '#991100';
+        ctx.fillRect(dScreenX - carW*0.35, screenY - carH*1.3, carW*0.7, carH*0.5);
+        ctx.fillStyle = '#80ccff';
+        ctx.fillRect(dScreenX - carW*0.2, screenY - carH*1.25, carW*0.4, carH*0.3);
     }
-    
+
     // Dashboard
-    drawDashboard();
-    
-    // Crash
-    if (crashed) {
-        ctx.fillStyle = 'rgba(255,50,0,0.4)';
-        ctx.fillRect(0, 0, W, H);
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 60px Courier New';
-        ctx.textAlign = 'center';
-        ctx.fillText('CRASH!', W / 2, H * 0.35);
-        ctx.font = '20px Courier New';
-        ctx.fillText('Returning to road...', W / 2, H * 0.35 + 40);
-    }
-}
-
-function drawQuad(x1, y1, w1, x2, y2, w2, color) {
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(x1 + w1, y1);
-    ctx.lineTo(x2 + w2, y2);
-    ctx.lineTo(x2, y2);
-    ctx.closePath();
-    ctx.fill();
-}
-
-function drawDashboard() {
-    var dh = H * 0.15;
-    var dy = H - dh;
-    
-    ctx.fillStyle = 'rgba(20,20,30,0.9)';
-    ctx.fillRect(0, dy, W, dh);
-    ctx.strokeStyle = '#555';
-    ctx.lineWidth = 1;
+    var dy = roadH;
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(0, dy, W, dashH);
+    ctx.strokeStyle = '#444'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(0, dy); ctx.lineTo(W, dy); ctx.stroke();
-    
-    var mph = Math.floor(speed);
-    var gear = speed < 60 ? 1 : speed < 130 ? 2 : speed < 220 ? 3 : 4;
-    
-    // Speed
+
+    var mph = Math.floor(speed / 50);
+    var gear = mph < 40 ? 1 : mph < 90 ? 2 : mph < 160 ? 3 : 4;
     ctx.fillStyle = '#0f0';
-    ctx.font = 'bold ' + Math.floor(dh * 0.5) + 'px Courier New';
+    ctx.font = 'bold ' + Math.floor(dashH*0.5) + 'px Courier New';
     ctx.textAlign = 'left';
-    ctx.fillText(mph + ' MPH', 20, dy + dh * 0.6);
-    
-    // Gear
+    ctx.fillText(mph + ' MPH', 20, dy + dashH*0.6);
     ctx.fillStyle = '#ff0';
-    ctx.font = Math.floor(dh * 0.3) + 'px Courier New';
-    ctx.fillText('GEAR ' + gear, 20, dy + dh * 0.9);
-    
-    // Lap
+    ctx.font = Math.floor(dashH*0.3) + 'px Courier New';
+    ctx.fillText('GEAR ' + gear, 20, dy + dashH*0.9);
+
     ctx.fillStyle = '#fff';
-    ctx.font = Math.floor(dh * 0.35) + 'px Courier New';
+    ctx.font = Math.floor(dashH*0.35) + 'px Courier New';
     ctx.textAlign = 'right';
-    ctx.fillText('LAP ' + laps, W - 20, dy + dh * 0.45);
-    ctx.fillText(lapTime.toFixed(1) + 's', W - 20, dy + dh * 0.75);
-    if (bestLap) {
-        ctx.fillStyle = '#0f0';
-        ctx.fillText('BEST ' + bestLap.toFixed(1) + 's', W - 20, dy + dh * 0.95);
-    }
-    
-    // Tachometer bar
-    var rpm = ((speed % 80) / 80);
-    var barX = W * 0.3, barW = W * 0.4, barH = dh * 0.15;
-    ctx.fillStyle = '#333';
-    ctx.fillRect(barX, dy + dh * 0.4, barW, barH);
-    ctx.fillStyle = rpm > 0.8 ? '#f00' : '#0a0';
-    ctx.fillRect(barX, dy + dh * 0.4, barW * rpm, barH);
-    ctx.fillStyle = '#aaa';
-    ctx.font = Math.floor(dh * 0.18) + 'px Courier New';
-    ctx.textAlign = 'center';
-    ctx.fillText('RPM', barX + barW / 2, dy + dh * 0.35);
-    
-    // Controls
+    ctx.fillText('LAP ' + laps, W-20, dy + dashH*0.4);
+    ctx.fillText(lapTime.toFixed(1) + 's', W-20, dy + dashH*0.7);
+    if (bestLap) { ctx.fillStyle='#0f0'; ctx.fillText('BEST '+bestLap.toFixed(1)+'s', W-20, dy+dashH*0.95); }
+
+    // RPM bar
+    var rpm = (speed % 4000) / 4000;
+    var bx = W*0.35, bw = W*0.3, bh = dashH*0.15;
+    ctx.fillStyle = '#333'; ctx.fillRect(bx, dy+dashH*0.4, bw, bh);
+    ctx.fillStyle = rpm > 0.8 ? '#f00' : '#0a0'; ctx.fillRect(bx, dy+dashH*0.4, bw*rpm, bh);
+
     ctx.fillStyle = 'rgba(255,255,255,0.4)';
-    ctx.font = '12px Courier New';
-    ctx.fillText('↑/W: Gas  ↓/S: Brake  ←/A →/D: Steer', W / 2, dy - 5);
+    ctx.font = '12px Courier New'; ctx.textAlign = 'center';
+    ctx.fillText('↑/W:Gas ↓/S:Brake ←/A →/D:Steer', W/2, dy-5);
+
+    if (crashed) {
+        ctx.fillStyle = 'rgba(200,0,0,0.5)';
+        ctx.fillRect(0, 0, W, roadH);
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 50px Courier New'; ctx.textAlign = 'center';
+        ctx.fillText('CRASH!', W/2, roadH*0.4);
+    }
 }
 
 // ==========================
