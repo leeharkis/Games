@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Triangles</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    padding: 20px;
+}
+
+.container {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+    max-width: fit-content;
+    width: fit-content;
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    width: 100%;
+    gap: 40px;
+}
+
+h1 {
+    color: #333;
+    font-size: 28px;
+}
+
+.stats {
+    display: flex;
+    gap: 20px;
+    align-items: center;
+}
+
+.stat {
+    text-align: center;
+}
+
+.stat-label {
+    color: #666;
+    font-size: 11px;
+    text-transform: uppercase;
+    display: block;
+}
+
+.stat-value {
+    color: #333;
+    font-size: 20px;
+    font-weight: bold;
+    display: block;
+}
+
+#timer {
+    font-size: 24px;
+    font-weight: bold;
+    color: #667eea;
+}
+
+#timer.warning {
+    color: #ff6b6b;
+}
+
+canvas {
+    border: 3px solid #667eea;
+    border-radius: 8px;
+    display: block;
+    margin: 0 auto 20px;
+    cursor: crosshair;
+    background: white;
+}
+
+.info {
+    text-align: center;
+    color: #666;
+    font-size: 14px;
+    margin-bottom: 20px;
+}
+
+.controls {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+button {
+    padding: 10px 20px;
+    font-size: 14px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: all 0.3s ease;
+}
+
+.btn-primary {
+    background: #667eea;
+    color: white;
+}
+
+.btn-primary:hover {
+    background: #5568d3;
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+}
+
+.btn-secondary {
+    background: #f093fb;
+    color: white;
+}
+
+.btn-secondary:hover {
+    background: #e074db;
+}
+
+.modal {
+    display: none;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: white;
+    border-radius: 12px;
+    padding: 30px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    z-index: 300;
+    max-width: 500px;
+    width: 90%;
+    text-align: center;
+}
+
+.modal.active {
+    display: block;
+}
+
+.modal h2 {
+    color: #2e7d32;
+    font-size: 24px;
+    margin-bottom: 15px;
+}
+
+.modal p {
+    color: #666;
+    margin-bottom: 10px;
+    font-size: 16px;
+}
+
+.modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.6);
+    z-index: 299;
+}
+
+.modal-overlay.active {
+    display: block;
+}
+
+.game-over-modal h2 {
+    color: #667eea !important;
+}
+
+@media (max-width: 480px) {
+    .header {
+        flex-direction: column;
+        gap: 15px;
+    }
+
+    .stats {
+        width: 100%;
+        justify-content: space-around;
+    }
+
+    canvas {
+        max-width: 100%;
+    }
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h1>TRIANGLES</h1>
+        <div class="stats">
+            <div class="stat">
+                <div class="stat-label">Score</div>
+                <div class="stat-value" id="score">0</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">Time</div>
+                <div class="stat-value" id="timer">60</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="info">Connect triangles of the same color by dragging. Longer chains = more points!</div>
+
+    <canvas id="gameCanvas" width="400" height="400"></canvas>
+
+    <div class="controls">
+        <button class="btn-primary" onclick="game.newGame()">New Game</button>
+    </div>
+</div>
+
+<div class="modal-overlay" id="gameOverOverlay"></div>
+<div class="modal game-over-modal" id="gameOverModal">
+    <h2>Game Over!</h2>
+    <p id="finalScore">Final Score: 0</p>
+    <p id="chainInfo"></p>
+    <button class="btn-primary" onclick="game.newGame()">Play Again</button>
+</div>
+
+<script>
+const Colors = ['#FF6B6B', '#4ECDC4', '#FFE66D', '#95E1D3', '#F38181'];
+
+class TriangleGame {
+    constructor() {
+        this.canvas = document.getElementById('gameCanvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.gridSize = 5;
+        this.triangleSize = this.canvas.width / this.gridSize;
+        this.grid = [];
+        this.score = 0;
+        this.timeLeft = 60;
+        this.gameActive = false;
+        this.timerInterval = null;
+        this.selectedTriangles = [];
+        this.selectedLine = [];
+        this.lastChainLength = 0;
+
+        this.canvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
+        this.canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
+        this.canvas.addEventListener('mouseup', (e) => this.handleMouseUp(e));
+        this.canvas.addEventListener('touchstart', (e) => this.handleTouchStart(e));
+        this.canvas.addEventListener('touchmove', (e) => this.handleTouchMove(e));
+        this.canvas.addEventListener('touchend', (e) => this.handleTouchEnd(e));
+
+        this.newGame();
+    }
+
+    newGame() {
+        this.generateGrid();
+        this.score = 0;
+        this.timeLeft = 60;
+        this.gameActive = true;
+        this.selectedTriangles = [];
+        this.selectedLine = [];
+        this.lastChainLength = 0;
+        document.getElementById('score').textContent = '0';
+        document.getElementById('timer').textContent = '60';
+        document.getElementById('gameOverModal').classList.remove('active');
+        document.getElementById('gameOverOverlay').classList.remove('active');
+
+        clearInterval(this.timerInterval);
+        this.timerInterval = setInterval(() => this.updateTimer(), 1000);
+
+        this.render();
+    }
+
+    generateGrid() {
+        this.grid = [];
+        for (let i = 0; i < this.gridSize; i++) {
+            this.grid[i] = [];
+            for (let j = 0; j < this.gridSize; j++) {
+                this.grid[i][j] = Math.floor(Math.random() * Colors.length);
+            }
+        }
+    }
+
+    updateTimer() {
+        if (!this.gameActive) return;
+        
+        this.timeLeft--;
+        document.getElementById('timer').textContent = this.timeLeft;
+        
+        const timerEl = document.getElementById('timer');
+        if (this.timeLeft <= 10) {
+            timerEl.classList.add('warning');
+        } else {
+            timerEl.classList.remove('warning');
+        }
+
+        if (this.timeLeft <= 0) {
+            this.endGame();
+        }
+    }
+
+    endGame() {
+        this.gameActive = false;
+        clearInterval(this.timerInterval);
+        document.getElementById('finalScore').textContent = `Final Score: ${this.score}`;
+        document.getElementById('chainInfo').textContent = 
+            this.lastChainLength > 1 ? `Best Chain: ${this.lastChainLength} triangles` : '';
+        document.getElementById('gameOverModal').classList.add('active');
+        document.getElementById('gameOverOverlay').classList.add('active');
+    }
+
+    getTriangleAtPos(x, y) {
+        const rect = this.canvas.getBoundingClientRect();
+        const canvasX = x - rect.left;
+        const canvasY = y - rect.top;
+
+        for (let i = 0; i < this.gridSize; i++) {
+            for (let j = 0; j < this.gridSize; j++) {
+                if (this.isPointInTriangle(canvasX, canvasY, i, j)) {
+                    return { row: i, col: j };
+                }
+            }
+        }
+        return null;
+    }
+
+    isPointInTriangle(px, py, row, col) {
+        const x = col * this.triangleSize;
+        const y = row * this.triangleSize;
+        const size = this.triangleSize;
+
+        // Check if point is in this triangle
+        const isEven = (row + col) % 2 === 0;
+        
+        if (isEven) {
+            // Pointing up triangle
+            const x1 = x, y1 = y + size;
+            const x2 = x + size, y2 = y + size;
+            const x3 = x + size / 2, y3 = y;
+            return this.pointInTriangle(px, py, x1, y1, x2, y2, x3, y3);
+        } else {
+            // Pointing down triangle
+            const x1 = x, y1 = y;
+            const x2 = x + size, y2 = y;
+            const x3 = x + size / 2, y3 = y + size;
+            return this.pointInTriangle(px, py, x1, y1, x2, y2, x3, y3);
+        }
+    }
+
+    pointInTriangle(px, py, x1, y1, x2, y2, x3, y3) {
+        const area = Math.abs((x2 - x1) * (y3 - y1) - (x3 - x1) * (y2 - y1));
+        const area1 = Math.abs((px - x2) * (y3 - y2) - (x3 - x2) * (py - y2));
+        const area2 = Math.abs((x1 - px) * (y3 - py) - (x3 - px) * (y1 - py));
+        const area3 = Math.abs((x1 - x2) * (py - y2) - (px - x2) * (y1 - y2));
+        
+        return Math.abs(area - (area1 + area2 + area3)) < 0.1;
+    }
+
+    isAdjacent(tri1, tri2) {
+        const dr = Math.abs(tri1.row - tri2.row);
+        const dc = Math.abs(tri1.col - tri2.col);
+        return (dr === 0 && dc === 1) || (dr === 1 && dc === 0) || (dr === 1 && dc === 1);
+    }
+
+    handleMouseDown(e) {
+        if (!this.gameActive) return;
+        const tri = this.getTriangleAtPos(e.clientX, e.clientY);
+        if (tri) this.startSelection(tri);
+    }
+
+    handleMouseMove(e) {
+        if (!this.gameActive || this.selectedTriangles.length === 0) return;
+        const tri = this.getTriangleAtPos(e.clientX, e.clientY);
+        if (tri) this.updateSelection(tri);
+    }
+
+    handleMouseUp() {
+        if (!this.gameActive) return;
+        this.finishSelection();
+    }
+
+    handleTouchStart(e) {
+        if (!this.gameActive) return;
+        e.preventDefault();
+        const touch = e.touches[0];
+        const tri = this.getTriangleAtPos(touch.clientX, touch.clientY);
+        if (tri) this.startSelection(tri);
+    }
+
+    handleTouchMove(e) {
+        if (!this.gameActive || this.selectedTriangles.length === 0) return;
+        e.preventDefault();
+        const touch = e.touches[0];
+        const tri = this.getTriangleAtPos(touch.clientX, touch.clientY);
+        if (tri) this.updateSelection(tri);
+    }
+
+    handleTouchEnd(e) {
+        if (!this.gameActive) return;
+        e.preventDefault();
+        this.finishSelection();
+    }
+
+    startSelection(tri) {
+        this.selectedTriangles = [tri];
+        this.selectedLine = [this.getTriangleCenter(tri)];
+    }
+
+    updateSelection(tri) {
+        const lastTri = this.selectedTriangles[this.selectedTriangles.length - 1];
+        
+        if (tri.row === lastTri.row && tri.col === lastTri.col) return;
+
+        // Can connect to adjacent triangle of same color, or expand chain
+        if (this.grid[tri.row][tri.col] === this.grid[lastTri.row][lastTri.col] && this.isAdjacent(tri, lastTri)) {
+            this.selectedTriangles.push(tri);
+            this.selectedLine.push(this.getTriangleCenter(tri));
+        } else if (this.selectedTriangles.length >= 2) {
+            // Can backtrack
+            const prevTri = this.selectedTriangles[this.selectedTriangles.length - 2];
+            if (tri.row === prevTri.row && tri.col === prevTri.col) {
+                this.selectedTriangles.pop();
+                this.selectedLine.pop();
+            }
+        }
+
+        this.render();
+    }
+
+    finishSelection() {
+        if (this.selectedTriangles.length >= 2) {
+            // Calculate points: base * chain length^2
+            const chainLength = this.selectedTriangles.length;
+            const points = chainLength * chainLength * 10;
+            this.score += points;
+            this.lastChainLength = Math.max(this.lastChainLength, chainLength);
+            
+            // Remove selected triangles and drop new ones
+            this.removeTriangles();
+        }
+
+        this.selectedTriangles = [];
+        this.selectedLine = [];
+        this.render();
+        document.getElementById('score').textContent = this.score;
+    }
+
+    removeTriangles() {
+        // Mark as empty
+        for (let tri of this.selectedTriangles) {
+            this.grid[tri.row][tri.col] = -1;
+        }
+
+        // Drop and refill
+        this.dropTriangles();
+    }
+
+    dropTriangles() {
+        // Drop triangles down
+        for (let col = 0; col < this.gridSize; col++) {
+            let writePos = this.gridSize - 1;
+            for (let row = this.gridSize - 1; row >= 0; row--) {
+                if (this.grid[row][col] !== -1) {
+                    if (row !== writePos) {
+                        this.grid[writePos][col] = this.grid[row][col];
+                        this.grid[row][col] = -1;
+                    }
+                    writePos--;
+                }
+            }
+        }
+
+        // Refill empty spaces
+        for (let row = 0; row < this.gridSize; row++) {
+            for (let col = 0; col < this.gridSize; col++) {
+                if (this.grid[row][col] === -1) {
+                    this.grid[row][col] = Math.floor(Math.random() * Colors.length);
+                }
+            }
+        }
+    }
+
+    getTriangleCenter(tri) {
+        const x = tri.col * this.triangleSize;
+        const y = tri.row * this.triangleSize;
+        const size = this.triangleSize;
+        const isEven = (tri.row + tri.col) % 2 === 0;
+
+        if (isEven) {
+            return { x: x + size / 2, y: y + size * 2 / 3 };
+        } else {
+            return { x: x + size / 2, y: y + size / 3 };
+        }
+    }
+
+    drawTriangle(row, col, color, opacity = 1) {
+        const x = col * this.triangleSize;
+        const y = row * this.triangleSize;
+        const size = this.triangleSize;
+        const isEven = (row + col) % 2 === 0;
+
+        this.ctx.fillStyle = color;
+        this.ctx.globalAlpha = opacity;
+        this.ctx.beginPath();
+
+        if (isEven) {
+            // Pointing up
+            this.ctx.moveTo(x, y + size);
+            this.ctx.lineTo(x + size, y + size);
+            this.ctx.lineTo(x + size / 2, y);
+        } else {
+            // Pointing down
+            this.ctx.moveTo(x, y);
+            this.ctx.lineTo(x + size, y);
+            this.ctx.lineTo(x + size / 2, y + size);
+        }
+
+        this.ctx.closePath();
+        this.ctx.fill();
+        this.ctx.globalAlpha = 1;
+    }
+
+    render() {
+        // Clear canvas
+        this.ctx.fillStyle = '#f8f9fa';
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // Draw grid
+        this.ctx.strokeStyle = '#ddd';
+        this.ctx.lineWidth = 1;
+        for (let i = 0; i <= this.gridSize; i++) {
+            this.ctx.beginPath();
+            this.ctx.moveTo(i * this.triangleSize, 0);
+            this.ctx.lineTo(i * this.triangleSize, this.canvas.height);
+            this.ctx.stroke();
+
+            this.ctx.beginPath();
+            this.ctx.moveTo(0, i * this.triangleSize);
+            this.ctx.lineTo(this.canvas.width, i * this.triangleSize);
+            this.ctx.stroke();
+        }
+
+        // Draw triangles
+        for (let i = 0; i < this.gridSize; i++) {
+            for (let j = 0; j < this.gridSize; j++) {
+                if (this.grid[i][j] !== -1) {
+                    const isSelected = this.selectedTriangles.some(t => t.row === i && t.col === j);
+                    const opacity = isSelected ? 1 : 0.8;
+                    this.drawTriangle(i, j, Colors[this.grid[i][j]], opacity);
+
+                    // Draw selection outline
+                    if (isSelected) {
+                        this.ctx.strokeStyle = '#333';
+                        this.ctx.lineWidth = 3;
+                        const x = j * this.triangleSize;
+                        const y = i * this.triangleSize;
+                        const size = this.triangleSize;
+                        const isEven = (i + j) % 2 === 0;
+
+                        this.ctx.beginPath();
+                        if (isEven) {
+                            this.ctx.moveTo(x, y + size);
+                            this.ctx.lineTo(x + size, y + size);
+                            this.ctx.lineTo(x + size / 2, y);
+                        } else {
+                            this.ctx.moveTo(x, y);
+                            this.ctx.lineTo(x + size, y);
+                            this.ctx.lineTo(x + size / 2, y + size);
+                        }
+                        this.ctx.closePath();
+                        this.ctx.stroke();
+                    }
+                }
+            }
+        }
+
+        // Draw selection line
+        if (this.selectedLine.length > 0) {
+            this.ctx.strokeStyle = '#333';
+            this.ctx.lineWidth = 4;
+            this.ctx.lineJoin = 'round';
+            this.ctx.lineCap = 'round';
+            this.ctx.beginPath();
+            this.ctx.moveTo(this.selectedLine[0].x, this.selectedLine[0].y);
+            for (let i = 1; i < this.selectedLine.length; i++) {
+                this.ctx.lineTo(this.selectedLine[i].x, this.selectedLine[i].y);
+            }
+            this.ctx.stroke();
+        }
+    }
+}
+
+const game = new TriangleGame();
+</script>
+
+</body>
+</html>
