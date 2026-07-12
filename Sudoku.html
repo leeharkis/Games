@@ -774,6 +774,7 @@ class Sudoku {
         if (this.grid[row][col] !== 0) {
             this.selectedNum = this.grid[row][col];
             this.updateNumBtnSelection();
+            this.updateNumberHighlights();
         }
 
         // Validate if cell has content
