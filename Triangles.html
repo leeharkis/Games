@@ -213,12 +213,22 @@ button {
         </div>
     </div>
 
-    <div class="info">Connect triangles of the same color by dragging. Longer chains = more points!</div>
+    <div class="info">Connect 4+ circles of the same color by dragging. Double-click to clear all of one color!</div>
 
     <canvas id="gameCanvas" width="480" height="480"></canvas>
 
     <div class="controls">
-        <button class="btn-primary" onclick="game.newGame()">New Game</button>
+        <button class="btn-primary" onclick="game.showModeSelection()">New Game</button>
+    </div>
+</div>
+
+<div class="modal-overlay" id="modeOverlay"></div>
+<div class="modal" id="modeModal">
+    <h2>Game Mode</h2>
+    <p>Choose how to play:</p>
+    <div class="controls" style="flex-direction: column; margin-top: 20px;">
+        <button class="btn-primary" onclick="game.startGameWithMode('time')">60 Second Challenge</button>
+        <button class="btn-secondary" onclick="game.startGameWithMode('moves')">25 Moves Challenge</button>
     </div>
 </div>
 
@@ -226,12 +236,16 @@ button {
 <div class="modal game-over-modal" id="gameOverModal">
     <h2>Game Over!</h2>
     <p id="finalScore">Final Score: 0</p>
-    <p id="chainInfo"></p>
-    <button class="btn-primary" onclick="game.newGame()">Play Again</button>
+    <p id="modeInfo"></p>
+    <div id="topScoresDisplay" style="text-align: left; margin: 20px 0; background: #f5f5f5; padding: 15px; border-radius: 8px; font-size: 13px;">
+        <strong>Top 5 Scores:</strong>
+        <div id="topScoresList"></div>
+    </div>
+    <button class="btn-primary" onclick="game.showModeSelection()">Play Again</button>
 </div>
 
 <script>
-const Colors = ['#FF6B6B', '#4ECDC4', '#FFE66D', '#95E1D3', '#F38181'];
+const Colors = ['#FF0000', '#0099FF', '#FFFF00', '#00CC33', '#FF00FF', '#FF6600', '#00FFFF', '#FFAA00'];
 
 class DotsGame {
     constructor() {
@@ -243,11 +257,17 @@ class DotsGame {
         this.grid = [];
         this.score = 0;
         this.timeLeft = 60;
+        this.movesLeft = 25;
         this.gameActive = false;
+        this.gameMode = null;
         this.timerInterval = null;
-        this.selectedTriangles = [];
+        this.selectedDots = [];
         this.selectedLine = [];
         this.lastChainLength = 0;
+        this.highScores = this.loadHighScores();
+        this.doubleClickThreshold = 300;
+        this.lastClickTime = 0;
+        this.lastClickPos = null;
 
         this.canvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
         this.canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
@@ -256,6 +276,35 @@ class DotsGame {
         this.canvas.addEventListener('touchmove', (e) => this.handleTouchMove(e));
         this.canvas.addEventListener('touchend', (e) => this.handleTouchEnd(e));
 
+        this.showModeSelection();
+    }
+
+    loadHighScores() {
+        const saved = localStorage.getItem('dotsHighScores');
+        return saved ? JSON.parse(saved) : [];
+    }
+
+    saveHighScores() {
+        localStorage.setItem('dotsHighScores', JSON.stringify(this.highScores));
+    }
+
+    addHighScore(score, mode) {
+        const entry = { score, mode, date: new Date().toLocaleDateString() };
+        this.highScores.push(entry);
+        this.highScores.sort((a, b) => b.score - a.score);
+        this.highScores = this.highScores.slice(0, 10);
+        this.saveHighScores();
+    }
+
+    showModeSelection() {
+        document.getElementById('modeModal').classList.add('active');
+        document.getElementById('modeOverlay').classList.add('active');
+    }
+
+    startGameWithMode(mode) {
+        this.gameMode = mode;
+        document.getElementById('modeModal').classList.remove('active');
+        document.getElementById('modeOverlay').classList.remove('active');
         this.newGame();
     }
 
@@ -263,17 +312,20 @@ class DotsGame {
         this.generateGrid();
         this.score = 0;
         this.timeLeft = 60;
+        this.movesLeft = 25;
         this.gameActive = true;
-        this.selectedTriangles = [];
+        this.selectedDots = [];
         this.selectedLine = [];
         this.lastChainLength = 0;
         document.getElementById('score').textContent = '0';
-        document.getElementById('timer').textContent = '60';
+        document.getElementById('timer').textContent = this.gameMode === 'time' ? '60' : '25';
         document.getElementById('gameOverModal').classList.remove('active');
         document.getElementById('gameOverOverlay').classList.remove('active');
 
         clearInterval(this.timerInterval);
-        this.timerInterval = setInterval(() => this.updateTimer(), 1000);
+        if (this.gameMode === 'time') {
+            this.timerInterval = setInterval(() => this.updateTimer(), 1000);
+        }
 
         this.render();
     }
@@ -309,11 +361,23 @@ class DotsGame {
     endGame() {
         this.gameActive = false;
         clearInterval(this.timerInterval);
+        this.addHighScore(this.score, this.gameMode);
         document.getElementById('finalScore').textContent = `Final Score: ${this.score}`;
-        document.getElementById('chainInfo').textContent = 
-            this.lastChainLength > 1 ? `Best Chain: ${this.lastChainLength} triangles` : '';
+        document.getElementById('modeInfo').textContent = 
+            this.gameMode === 'time' ? 'Time Challenge Complete!' : 'Moves Challenge Complete!';
+        this.displayTopScores();
         document.getElementById('gameOverModal').classList.add('active');
         document.getElementById('gameOverOverlay').classList.add('active');
+    }
+
+    displayTopScores() {
+        const topScoresList = document.getElementById('topScoresList');
+        topScoresList.innerHTML = '';
+        for (let i = 0; i < Math.min(5, this.highScores.length); i++) {
+            const score = this.highScores[i];
+            const modeLabel = score.mode === 'time' ? '⏱' : '🎯';
+            topScoresList.innerHTML += `<div style="padding: 5px 0; border-bottom: 1px solid #ddd;">${i + 1}. ${score.score} ${modeLabel}</div>`;
+        }
     }
 
     getDotAtPos(x, y) {
@@ -334,20 +398,36 @@ class DotsGame {
         return null;
     }
 
-    isAdjacent(tri1, tri2) {
-        const dr = Math.abs(tri1.row - tri2.row);
-        const dc = Math.abs(tri1.col - tri2.col);
+    isAdjacent(dot1, dot2) {
+        const dr = Math.abs(dot1.row - dot2.row);
+        const dc = Math.abs(dot1.col - dot2.col);
         return (dr === 0 && dc === 1) || (dr === 1 && dc === 0) || (dr === 1 && dc === 1);
     }
 
     handleMouseDown(e) {
         if (!this.gameActive) return;
+        
+        const currentTime = new Date().getTime();
         const dot = this.getDotAtPos(e.clientX, e.clientY);
-        if (dot) this.startSelection(dot);
+        
+        if (!dot) return;
+
+        if (this.lastClickTime && (currentTime - this.lastClickTime) < this.doubleClickThreshold) {
+            const lastPos = this.lastClickPos;
+            if (lastPos && dot.row === lastPos.row && dot.col === lastPos.col) {
+                this.doubleClickDot(dot);
+                this.lastClickTime = 0;
+                return;
+            }
+        }
+
+        this.lastClickTime = currentTime;
+        this.lastClickPos = dot;
+        this.startSelection(dot);
     }
 
     handleMouseMove(e) {
-        if (!this.gameActive || this.selectedTriangles.length === 0) return;
+        if (!this.gameActive || this.selectedDots.length === 0) return;
         const dot = this.getDotAtPos(e.clientX, e.clientY);
         if (dot) this.updateSelection(dot);
     }
@@ -366,7 +446,7 @@ class DotsGame {
     }
 
     handleTouchMove(e) {
-        if (!this.gameActive || this.selectedTriangles.length === 0) return;
+        if (!this.gameActive || this.selectedDots.length === 0) return;
         e.preventDefault();
         const touch = e.touches[0];
         const dot = this.getDotAtPos(touch.clientX, touch.clientY);
@@ -380,24 +460,22 @@ class DotsGame {
     }
 
     startSelection(dot) {
-        this.selectedTriangles = [dot];
+        this.selectedDots = [dot];
         this.selectedLine = [this.getDotCenter(dot)];
     }
 
     updateSelection(dot) {
-        const lastDot = this.selectedTriangles[this.selectedTriangles.length - 1];
+        const lastDot = this.selectedDots[this.selectedDots.length - 1];
         
         if (dot.row === lastDot.row && dot.col === lastDot.col) return;
 
-        // Can connect to adjacent dot of same color, or expand chain
         if (this.grid[dot.row][dot.col] === this.grid[lastDot.row][lastDot.col] && this.isAdjacent(dot, lastDot)) {
-            this.selectedTriangles.push(dot);
+            this.selectedDots.push(dot);
             this.selectedLine.push(this.getDotCenter(dot));
-        } else if (this.selectedTriangles.length >= 2) {
-            // Can backtrack
-            const prevDot = this.selectedTriangles[this.selectedTriangles.length - 2];
+        } else if (this.selectedDots.length >= 2) {
+            const prevDot = this.selectedDots[this.selectedDots.length - 2];
             if (dot.row === prevDot.row && dot.col === prevDot.col) {
-                this.selectedTriangles.pop();
+                this.selectedDots.pop();
                 this.selectedLine.pop();
             }
         }
@@ -406,56 +484,82 @@ class DotsGame {
     }
 
     finishSelection() {
-        if (this.selectedTriangles.length >= 2) {
-            // Calculate points: base * chain length^2
-            const chainLength = this.selectedTriangles.length;
-            const points = chainLength * chainLength * 10;
+        if (this.selectedDots.length >= 4) {
+            const chainLength = this.selectedDots.length;
+            const points = chainLength * 10;
             this.score += points;
             this.lastChainLength = Math.max(this.lastChainLength, chainLength);
             
-            // Remove selected triangles and drop new ones
-            this.removeTriangles();
+            this.removeAllDotsOfColor();
+            
+            if (this.gameMode === 'moves') {
+                this.movesLeft--;
+                document.getElementById('timer').textContent = this.movesLeft;
+                if (this.movesLeft <= 0) {
+                    this.endGame();
+                }
+            }
         }
 
-        this.selectedTriangles = [];
+        this.selectedDots = [];
         this.selectedLine = [];
         this.render();
         document.getElementById('score').textContent = this.score;
     }
 
-    removeTriangles() {
-        // Mark as empty
-        for (let tri of this.selectedTriangles) {
-            this.grid[tri.row][tri.col] = -1;
+    doubleClickDot(dot) {
+        if (this.grid[dot.row][dot.col] === -1) return;
+        
+        const colorToRemove = this.grid[dot.row][dot.col];
+        const countRemoved = this.countDotsOfColor(colorToRemove);
+        
+        for (let i = 0; i < this.gridSize; i++) {
+            for (let j = 0; j < this.gridSize; j++) {
+                if (this.grid[i][j] === colorToRemove) {
+                    this.grid[i][j] = -1;
+                }
+            }
         }
 
-        // Drop and refill
-        this.dropTriangles();
+        this.score += Math.max(10, countRemoved * 3);
+
+        this.dropDots();
+
+        if (this.gameMode === 'moves') {
+            this.movesLeft--;
+            document.getElementById('timer').textContent = this.movesLeft;
+            if (this.movesLeft <= 0) {
+                this.endGame();
+            }
+        }
+
+        this.render();
+        document.getElementById('score').textContent = this.score;
     }
 
-    dropTriangles() {
-        // Drop triangles down
-        for (let col = 0; col < this.gridSize; col++) {
-            let writePos = this.gridSize - 1;
-            for (let row = this.gridSize - 1; row >= 0; row--) {
-                if (this.grid[row][col] !== -1) {
-                    if (row !== writePos) {
-                        this.grid[writePos][col] = this.grid[row][col];
-                        this.grid[row][col] = -1;
-                    }
-                    writePos--;
+    countDotsOfColor(color) {
+        let count = 0;
+        for (let i = 0; i < this.gridSize; i++) {
+            for (let j = 0; j < this.gridSize; j++) {
+                if (this.grid[i][j] === color) count++;
+            }
+        }
+        return count;
+    }
+
+    removeAllDotsOfColor() {
+        if (this.selectedDots.length === 0) return;
+        const color = this.grid[this.selectedDots[0].row][this.selectedDots[0].col];
+        
+        for (let i = 0; i < this.gridSize; i++) {
+            for (let j = 0; j < this.gridSize; j++) {
+                if (this.grid[i][j] === color) {
+                    this.grid[i][j] = -1;
                 }
             }
         }
 
-        // Refill empty spaces
-        for (let row = 0; row < this.gridSize; row++) {
-            for (let col = 0; col < this.gridSize; col++) {
-                if (this.grid[row][col] === -1) {
-                    this.grid[row][col] = Math.floor(Math.random() * Colors.length);
-                }
-            }
-        }
+        this.dropDots();
     }
 
     getDotCenter(dot) {
@@ -473,15 +577,41 @@ class DotsGame {
         this.ctx.beginPath();
         this.ctx.arc(x, y, this.circleRadius, 0, Math.PI * 2);
         this.ctx.fill();
+        
+        this.ctx.strokeStyle = '#fff';
+        this.ctx.lineWidth = 2;
+        this.ctx.stroke();
+        
         this.ctx.globalAlpha = 1;
     }
 
+    dropDots() {
+        for (let col = 0; col < this.gridSize; col++) {
+            let writePos = this.gridSize - 1;
+            for (let row = this.gridSize - 1; row >= 0; row--) {
+                if (this.grid[row][col] !== -1) {
+                    if (row !== writePos) {
+                        this.grid[writePos][col] = this.grid[row][col];
+                        this.grid[row][col] = -1;
+                    }
+                    writePos--;
+                }
+            }
+        }
+
+        for (let row = 0; row < this.gridSize; row++) {
+            for (let col = 0; col < this.gridSize; col++) {
+                if (this.grid[row][col] === -1) {
+                    this.grid[row][col] = Math.floor(Math.random() * Colors.length);
+                }
+            }
+        }
+    }
+
     render() {
-        // Clear canvas
         this.ctx.fillStyle = '#f8f9fa';
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-        // Draw grid lines (subtle)
         this.ctx.strokeStyle = '#eee';
         this.ctx.lineWidth = 1;
         for (let i = 0; i <= this.gridSize; i++) {
@@ -496,18 +626,16 @@ class DotsGame {
             this.ctx.stroke();
         }
 
-        // Draw circles
         for (let i = 0; i < this.gridSize; i++) {
             for (let j = 0; j < this.gridSize; j++) {
                 if (this.grid[i][j] !== -1) {
-                    const isSelected = this.selectedTriangles.some(t => t.row === i && t.col === j);
+                    const isSelected = this.selectedDots.some(t => t.row === i && t.col === j);
                     const opacity = isSelected ? 1 : 0.8;
                     this.drawCircle(i, j, Colors[this.grid[i][j]], opacity);
 
-                    // Draw selection outline
                     if (isSelected) {
-                        this.ctx.strokeStyle = '#333';
-                        this.ctx.lineWidth = 3;
+                        this.ctx.strokeStyle = '#000';
+                        this.ctx.lineWidth = 4;
                         const x = j * this.cellSize + this.cellSize / 2;
                         const y = i * this.cellSize + this.cellSize / 2;
                         this.ctx.beginPath();
@@ -518,9 +646,8 @@ class DotsGame {
             }
         }
 
-        // Draw selection line
         if (this.selectedLine.length > 0) {
-            this.ctx.strokeStyle = '#333';
+            this.ctx.strokeStyle = '#000';
             this.ctx.lineWidth = 4;
             this.ctx.lineJoin = 'round';
             this.ctx.lineCap = 'round';
