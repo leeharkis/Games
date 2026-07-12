@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Triangles</title>
+<title>Dots</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -200,7 +200,7 @@ button {
 
 <div class="container">
     <div class="header">
-        <h1>TRIANGLES</h1>
+        <h1>DOTS</h1>
         <div class="stats">
             <div class="stat">
                 <div class="stat-label">Score</div>
@@ -215,7 +215,7 @@ button {
 
     <div class="info">Connect triangles of the same color by dragging. Longer chains = more points!</div>
 
-    <canvas id="gameCanvas" width="400" height="400"></canvas>
+    <canvas id="gameCanvas" width="480" height="480"></canvas>
 
     <div class="controls">
         <button class="btn-primary" onclick="game.newGame()">New Game</button>
@@ -233,12 +233,13 @@ button {
 <script>
 const Colors = ['#FF6B6B', '#4ECDC4', '#FFE66D', '#95E1D3', '#F38181'];
 
-class TriangleGame {
+class DotsGame {
     constructor() {
         this.canvas = document.getElementById('gameCanvas');
         this.ctx = this.canvas.getContext('2d');
-        this.gridSize = 5;
-        this.triangleSize = this.canvas.width / this.gridSize;
+        this.gridSize = 8;
+        this.cellSize = this.canvas.width / this.gridSize;
+        this.circleRadius = this.cellSize * 0.35;
         this.grid = [];
         this.score = 0;
         this.timeLeft = 60;
@@ -315,51 +316,22 @@ class TriangleGame {
         document.getElementById('gameOverOverlay').classList.add('active');
     }
 
-    getTriangleAtPos(x, y) {
+    getDotAtPos(x, y) {
         const rect = this.canvas.getBoundingClientRect();
         const canvasX = x - rect.left;
         const canvasY = y - rect.top;
 
         for (let i = 0; i < this.gridSize; i++) {
             for (let j = 0; j < this.gridSize; j++) {
-                if (this.isPointInTriangle(canvasX, canvasY, i, j)) {
+                const cx = j * this.cellSize + this.cellSize / 2;
+                const cy = i * this.cellSize + this.cellSize / 2;
+                const dist = Math.sqrt((canvasX - cx) ** 2 + (canvasY - cy) ** 2);
+                if (dist <= this.circleRadius) {
                     return { row: i, col: j };
                 }
             }
         }
         return null;
-    }
-
-    isPointInTriangle(px, py, row, col) {
-        const x = col * this.triangleSize;
-        const y = row * this.triangleSize;
-        const size = this.triangleSize;
-
-        // Check if point is in this triangle
-        const isEven = (row + col) % 2 === 0;
-        
-        if (isEven) {
-            // Pointing up triangle
-            const x1 = x, y1 = y + size;
-            const x2 = x + size, y2 = y + size;
-            const x3 = x + size / 2, y3 = y;
-            return this.pointInTriangle(px, py, x1, y1, x2, y2, x3, y3);
-        } else {
-            // Pointing down triangle
-            const x1 = x, y1 = y;
-            const x2 = x + size, y2 = y;
-            const x3 = x + size / 2, y3 = y + size;
-            return this.pointInTriangle(px, py, x1, y1, x2, y2, x3, y3);
-        }
-    }
-
-    pointInTriangle(px, py, x1, y1, x2, y2, x3, y3) {
-        const area = Math.abs((x2 - x1) * (y3 - y1) - (x3 - x1) * (y2 - y1));
-        const area1 = Math.abs((px - x2) * (y3 - y2) - (x3 - x2) * (py - y2));
-        const area2 = Math.abs((x1 - px) * (y3 - py) - (x3 - px) * (y1 - py));
-        const area3 = Math.abs((x1 - x2) * (py - y2) - (px - x2) * (y1 - y2));
-        
-        return Math.abs(area - (area1 + area2 + area3)) < 0.1;
     }
 
     isAdjacent(tri1, tri2) {
@@ -370,14 +342,14 @@ class TriangleGame {
 
     handleMouseDown(e) {
         if (!this.gameActive) return;
-        const tri = this.getTriangleAtPos(e.clientX, e.clientY);
-        if (tri) this.startSelection(tri);
+        const dot = this.getDotAtPos(e.clientX, e.clientY);
+        if (dot) this.startSelection(dot);
     }
 
     handleMouseMove(e) {
         if (!this.gameActive || this.selectedTriangles.length === 0) return;
-        const tri = this.getTriangleAtPos(e.clientX, e.clientY);
-        if (tri) this.updateSelection(tri);
+        const dot = this.getDotAtPos(e.clientX, e.clientY);
+        if (dot) this.updateSelection(dot);
     }
 
     handleMouseUp() {
@@ -389,16 +361,16 @@ class TriangleGame {
         if (!this.gameActive) return;
         e.preventDefault();
         const touch = e.touches[0];
-        const tri = this.getTriangleAtPos(touch.clientX, touch.clientY);
-        if (tri) this.startSelection(tri);
+        const dot = this.getDotAtPos(touch.clientX, touch.clientY);
+        if (dot) this.startSelection(dot);
     }
 
     handleTouchMove(e) {
         if (!this.gameActive || this.selectedTriangles.length === 0) return;
         e.preventDefault();
         const touch = e.touches[0];
-        const tri = this.getTriangleAtPos(touch.clientX, touch.clientY);
-        if (tri) this.updateSelection(tri);
+        const dot = this.getDotAtPos(touch.clientX, touch.clientY);
+        if (dot) this.updateSelection(dot);
     }
 
     handleTouchEnd(e) {
@@ -407,24 +379,24 @@ class TriangleGame {
         this.finishSelection();
     }
 
-    startSelection(tri) {
-        this.selectedTriangles = [tri];
-        this.selectedLine = [this.getTriangleCenter(tri)];
+    startSelection(dot) {
+        this.selectedTriangles = [dot];
+        this.selectedLine = [this.getDotCenter(dot)];
     }
 
-    updateSelection(tri) {
-        const lastTri = this.selectedTriangles[this.selectedTriangles.length - 1];
+    updateSelection(dot) {
+        const lastDot = this.selectedTriangles[this.selectedTriangles.length - 1];
         
-        if (tri.row === lastTri.row && tri.col === lastTri.col) return;
+        if (dot.row === lastDot.row && dot.col === lastDot.col) return;
 
-        // Can connect to adjacent triangle of same color, or expand chain
-        if (this.grid[tri.row][tri.col] === this.grid[lastTri.row][lastTri.col] && this.isAdjacent(tri, lastTri)) {
-            this.selectedTriangles.push(tri);
-            this.selectedLine.push(this.getTriangleCenter(tri));
+        // Can connect to adjacent dot of same color, or expand chain
+        if (this.grid[dot.row][dot.col] === this.grid[lastDot.row][lastDot.col] && this.isAdjacent(dot, lastDot)) {
+            this.selectedTriangles.push(dot);
+            this.selectedLine.push(this.getDotCenter(dot));
         } else if (this.selectedTriangles.length >= 2) {
             // Can backtrack
-            const prevTri = this.selectedTriangles[this.selectedTriangles.length - 2];
-            if (tri.row === prevTri.row && tri.col === prevTri.col) {
+            const prevDot = this.selectedTriangles[this.selectedTriangles.length - 2];
+            if (dot.row === prevDot.row && dot.col === prevDot.col) {
                 this.selectedTriangles.pop();
                 this.selectedLine.pop();
             }
@@ -486,42 +458,20 @@ class TriangleGame {
         }
     }
 
-    getTriangleCenter(tri) {
-        const x = tri.col * this.triangleSize;
-        const y = tri.row * this.triangleSize;
-        const size = this.triangleSize;
-        const isEven = (tri.row + tri.col) % 2 === 0;
-
-        if (isEven) {
-            return { x: x + size / 2, y: y + size * 2 / 3 };
-        } else {
-            return { x: x + size / 2, y: y + size / 3 };
-        }
+    getDotCenter(dot) {
+        const x = dot.col * this.cellSize + this.cellSize / 2;
+        const y = dot.row * this.cellSize + this.cellSize / 2;
+        return { x, y };
     }
 
-    drawTriangle(row, col, color, opacity = 1) {
-        const x = col * this.triangleSize;
-        const y = row * this.triangleSize;
-        const size = this.triangleSize;
-        const isEven = (row + col) % 2 === 0;
+    drawCircle(row, col, color, opacity = 1) {
+        const x = col * this.cellSize + this.cellSize / 2;
+        const y = row * this.cellSize + this.cellSize / 2;
 
         this.ctx.fillStyle = color;
         this.ctx.globalAlpha = opacity;
         this.ctx.beginPath();
-
-        if (isEven) {
-            // Pointing up
-            this.ctx.moveTo(x, y + size);
-            this.ctx.lineTo(x + size, y + size);
-            this.ctx.lineTo(x + size / 2, y);
-        } else {
-            // Pointing down
-            this.ctx.moveTo(x, y);
-            this.ctx.lineTo(x + size, y);
-            this.ctx.lineTo(x + size / 2, y + size);
-        }
-
-        this.ctx.closePath();
+        this.ctx.arc(x, y, this.circleRadius, 0, Math.PI * 2);
         this.ctx.fill();
         this.ctx.globalAlpha = 1;
     }
@@ -531,49 +481,37 @@ class TriangleGame {
         this.ctx.fillStyle = '#f8f9fa';
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-        // Draw grid
-        this.ctx.strokeStyle = '#ddd';
+        // Draw grid lines (subtle)
+        this.ctx.strokeStyle = '#eee';
         this.ctx.lineWidth = 1;
         for (let i = 0; i <= this.gridSize; i++) {
             this.ctx.beginPath();
-            this.ctx.moveTo(i * this.triangleSize, 0);
-            this.ctx.lineTo(i * this.triangleSize, this.canvas.height);
+            this.ctx.moveTo(i * this.cellSize, 0);
+            this.ctx.lineTo(i * this.cellSize, this.canvas.height);
             this.ctx.stroke();
 
             this.ctx.beginPath();
-            this.ctx.moveTo(0, i * this.triangleSize);
-            this.ctx.lineTo(this.canvas.width, i * this.triangleSize);
+            this.ctx.moveTo(0, i * this.cellSize);
+            this.ctx.lineTo(this.canvas.width, i * this.cellSize);
             this.ctx.stroke();
         }
 
-        // Draw triangles
+        // Draw circles
         for (let i = 0; i < this.gridSize; i++) {
             for (let j = 0; j < this.gridSize; j++) {
                 if (this.grid[i][j] !== -1) {
                     const isSelected = this.selectedTriangles.some(t => t.row === i && t.col === j);
                     const opacity = isSelected ? 1 : 0.8;
-                    this.drawTriangle(i, j, Colors[this.grid[i][j]], opacity);
+                    this.drawCircle(i, j, Colors[this.grid[i][j]], opacity);
 
                     // Draw selection outline
                     if (isSelected) {
                         this.ctx.strokeStyle = '#333';
                         this.ctx.lineWidth = 3;
-                        const x = j * this.triangleSize;
-                        const y = i * this.triangleSize;
-                        const size = this.triangleSize;
-                        const isEven = (i + j) % 2 === 0;
-
+                        const x = j * this.cellSize + this.cellSize / 2;
+                        const y = i * this.cellSize + this.cellSize / 2;
                         this.ctx.beginPath();
-                        if (isEven) {
-                            this.ctx.moveTo(x, y + size);
-                            this.ctx.lineTo(x + size, y + size);
-                            this.ctx.lineTo(x + size / 2, y);
-                        } else {
-                            this.ctx.moveTo(x, y);
-                            this.ctx.lineTo(x + size, y);
-                            this.ctx.lineTo(x + size / 2, y + size);
-                        }
-                        this.ctx.closePath();
+                        this.ctx.arc(x, y, this.circleRadius, 0, Math.PI * 2);
                         this.ctx.stroke();
                     }
                 }
@@ -596,7 +534,7 @@ class TriangleGame {
     }
 }
 
-const game = new TriangleGame();
+const game = new DotsGame();
 </script>
 
 </body>
