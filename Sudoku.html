@@ -222,6 +222,11 @@ button {
     background: #ffcccc;
 }
 
+.cell.number-highlight {
+    background: #ffff00;
+    color: #000;
+}
+
 .cell:nth-child(3n) {
     border-right: 3px solid #333;
 }
@@ -755,7 +760,7 @@ class Sudoku {
 
         // Clear previous selection and related cells
         document.querySelectorAll('.cell').forEach(c => {
-            c.classList.remove('selected', 'related', 'conflict');
+            c.classList.remove('selected', 'related', 'conflict', 'number-highlight');
             c.style.background = '';
             c.style.color = '';
             c.style.fontWeight = '';
@@ -792,6 +797,17 @@ class Sudoku {
             for (let j = boxCol; j < boxCol + 3; j++) {
                 if (!(i === row && j === col)) {
                     document.querySelector(`[data-row="${i}"][data-col="${j}"]`)?.classList.add('related');
+                }
+            }
+        }
+
+        // Highlight all instances of selected number
+        if (this.selectedNum) {
+            for (let i = 0; i < 9; i++) {
+                for (let j = 0; j < 9; j++) {
+                    if (this.grid[i][j] === this.selectedNum) {
+                        document.querySelector(`[data-row="${i}"][data-col="${j}"]`)?.classList.add('number-highlight');
+                    }
                 }
             }
         }
