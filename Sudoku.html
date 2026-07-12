@@ -742,15 +742,12 @@ class Sudoku {
         if (this.hintedCell && this.hintedCell.row === row && this.hintedCell.col === col) {
             this.selectedNum = this.grid[row][col];
             this.hintedCell = null;
-            this.updateNumBtnSelection();
-            this.updateNumberHighlights();
             // Don't render or recurse, just continue with normal selection below
         } else {
             // If clicking a cell with a number, select that number (don't place/clear)
             if (this.grid[row][col] !== 0) {
                 // Just select this number, don't modify grid
                 this.selectedNum = this.grid[row][col];
-                this.updateNumBtnSelection();
             } else if (this.selectedNum) {
                 // Only place/clear if cell is empty and we have a number selected
                 if (this.grid[row][col] === this.selectedNum) {
@@ -779,8 +776,6 @@ class Sudoku {
         // Update selected number if cell has a value
         if (this.grid[row][col] !== 0) {
             this.selectedNum = this.grid[row][col];
-            this.updateNumBtnSelection();
-            this.updateNumberHighlights();
         }
 
         // Validate if cell has content
@@ -810,6 +805,7 @@ class Sudoku {
 
         // Update highlights for selected number
         this.updateNumberHighlights();
+        this.updateNumBtnSelection();
 
         if (this.isComplete() && this.isSolved()) {
             this.stopTimer();
