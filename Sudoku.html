@@ -223,8 +223,8 @@ button {
 }
 
 .cell.number-highlight {
-    background: #ffff00;
-    color: #000;
+    background: #ffff00 !important;
+    color: #000 !important;
 }
 
 .cell:nth-child(3n) {
@@ -906,6 +906,21 @@ class Sudoku {
         });
     }
 
+    updateNumberHighlights() {
+        document.querySelectorAll('.cell').forEach(cell => {
+            cell.classList.remove('number-highlight');
+        });
+        if (this.selectedNum) {
+            for (let i = 0; i < 9; i++) {
+                for (let j = 0; j < 9; j++) {
+                    if (this.grid[i][j] === this.selectedNum) {
+                        document.querySelector(`[data-row="${i}"][data-col="${j}"]`)?.classList.add('number-highlight');
+                    }
+                }
+            }
+        }
+    }
+
     isComplete() {
         for (let i = 0; i < 9; i++) {
             for (let j = 0; j < 9; j++) {
@@ -1133,6 +1148,7 @@ class Sudoku {
                 document.getElementById('delete-btn').classList.remove('active');
                 this.selectedNum = (this.selectedNum === num) ? null : num;
                 this.updateNumBtnSelection();
+                this.updateNumberHighlights();
             });
         });
 
@@ -1143,6 +1159,7 @@ class Sudoku {
                 document.getElementById('delete-btn').classList.remove('active');
                 this.selectedNum = (this.selectedNum === num) ? null : num;
                 this.updateNumBtnSelection();
+                this.updateNumberHighlights();
             } else if (e.key === 'Backspace' || e.key === 'Delete') {
                 e.preventDefault();
                 this.deleteMode = !this.deleteMode;
