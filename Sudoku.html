@@ -802,16 +802,8 @@ class Sudoku {
             }
         }
 
-        // Highlight all instances of selected number
-        if (this.selectedNum) {
-            for (let i = 0; i < 9; i++) {
-                for (let j = 0; j < 9; j++) {
-                    if (this.grid[i][j] === this.selectedNum) {
-                        document.querySelector(`[data-row="${i}"][data-col="${j}"]`)?.classList.add('number-highlight');
-                    }
-                }
-            }
-        }
+        // Update highlights for selected number
+        this.updateNumberHighlights();
 
         if (this.isComplete() && this.isSolved()) {
             this.stopTimer();
