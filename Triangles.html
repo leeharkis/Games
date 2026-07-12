@@ -213,7 +213,7 @@ button {
         </div>
     </div>
 
-    <div class="info">Connect 4+ circles of the same color by dragging. Double-click to clear all of one color!</div>
+    <div class="info">Connect 2+ circles of the same color by dragging. Enclosed dots disappear too!</div>
 
     <canvas id="gameCanvas" width="480" height="480"></canvas>
 
@@ -265,9 +265,6 @@ class DotsGame {
         this.selectedLine = [];
         this.lastChainLength = 0;
         this.highScores = this.loadHighScores();
-        this.doubleClickThreshold = 300;
-        this.lastClickTime = 0;
-        this.lastClickPos = null;
 
         this.canvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
         this.canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
@@ -407,23 +404,8 @@ class DotsGame {
     handleMouseDown(e) {
         if (!this.gameActive) return;
         
-        const currentTime = new Date().getTime();
         const dot = this.getDotAtPos(e.clientX, e.clientY);
-        
-        if (!dot) return;
-
-        if (this.lastClickTime && (currentTime - this.lastClickTime) < this.doubleClickThreshold) {
-            const lastPos = this.lastClickPos;
-            if (lastPos && dot.row === lastPos.row && dot.col === lastPos.col) {
-                this.doubleClickDot(dot);
-                this.lastClickTime = 0;
-                return;
-            }
-        }
-
-        this.lastClickTime = currentTime;
-        this.lastClickPos = dot;
-        this.startSelection(dot);
+        if (dot) this.startSelection(dot);
     }
 
     handleMouseMove(e) {
@@ -484,13 +466,24 @@ class DotsGame {
     }
 
     finishSelection() {
-        if (this.selectedDots.length >= 4) {
+        if (this.selectedDots.length >= 2) {
             const chainLength = this.selectedDots.length;
             const points = chainLength * 10;
             this.score += points;
             this.lastChainLength = Math.max(this.lastChainLength, chainLength);
             
-            this.removeAllDotsOfColor();
+            // Remove selected dots
+            const removedPositions = new Set();
+            for (let dot of this.selectedDots) {
+                removedPositions.add(`${dot.row},${dot.col}`);
+                this.grid[dot.row][dot.col] = -1;
+            }
+            
+            // Check for enclosed dots and remove them
+            this.removeEnclosedDots(this.selectedDots);
+            
+            // Drop and refill
+            this.dropDots();
             
             if (this.gameMode === 'moves') {
                 this.movesLeft--;
@@ -505,6 +498,63 @@ class DotsGame {
         this.selectedLine = [];
         this.render();
         document.getElementById('score').textContent = this.score;
+    }
+
+    removeEnclosedDots(chain) {
+        if (chain.length < 3) return;
+
+        // Get bounding box of chain
+        let minRow = Math.min(...chain.map(d => d.row));
+        let maxRow = Math.max(...chain.map(d => d.row));
+        let minCol = Math.min(...chain.map(d => d.col));
+        let maxCol = Math.max(...chain.map(d => d.col));
+
+        // Flood fill from outside to mark reachable dots
+        const reachable = new Set();
+        const queue = [];
+        
+        // Start from edges
+        for (let i = 0; i < this.gridSize; i++) {
+            for (let j = 0; j < this.gridSize; j++) {
+                if (i === 0 || i === this.gridSize - 1 || j === 0 || j === this.gridSize - 1) {
+                    if (this.grid[i][j] !== -1) {
+                        queue.push({ row: i, col: j });
+                        reachable.add(`${i},${j}`);
+                    }
+                }
+            }
+        }
+
+        // Flood fill
+        while (queue.length > 0) {
+            const { row, col } = queue.shift();
+            
+            for (let di = -1; di <= 1; di++) {
+                for (let dj = -1; dj <= 1; dj++) {
+                    if (Math.abs(di) + Math.abs(dj) !== 1) continue;
+                    
+                    const ni = row + di;
+                    const nj = col + dj;
+                    
+                    if (ni >= 0 && ni < this.gridSize && nj >= 0 && nj < this.gridSize) {
+                        const key = `${ni},${nj}`;
+                        if (this.grid[ni][nj] !== -1 && !reachable.has(key)) {
+                            reachable.add(key);
+                            queue.push({ row: ni, col: nj });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Remove unreachable dots (enclosed)
+        for (let i = 0; i < this.gridSize; i++) {
+            for (let j = 0; j < this.gridSize; j++) {
+                if (this.grid[i][j] !== -1 && !reachable.has(`${i},${j}`)) {
+                    this.grid[i][j] = -1;
+                }
+            }
+        }
     }
 
     doubleClickDot(dot) {
@@ -560,6 +610,46 @@ class DotsGame {
         }
 
         this.dropDots();
+    }
+
+    doubleClickDot(dot) {
+        if (this.grid[dot.row][dot.col] === -1) return;
+        
+        const colorToRemove = this.grid[dot.row][dot.col];
+        const countRemoved = this.countDotsOfColor(colorToRemove);
+        
+        for (let i = 0; i < this.gridSize; i++) {
+            for (let j = 0; j < this.gridSize; j++) {
+                if (this.grid[i][j] === colorToRemove) {
+                    this.grid[i][j] = -1;
+                }
+            }
+        }
+
+        this.score += Math.max(10, countRemoved * 3);
+
+        this.dropDots();
+
+        if (this.gameMode === 'moves') {
+            this.movesLeft--;
+            document.getElementById('timer').textContent = this.movesLeft;
+            if (this.movesLeft <= 0) {
+                this.endGame();
+            }
+        }
+
+        this.render();
+        document.getElementById('score').textContent = this.score;
+    }
+
+    countDotsOfColor(color) {
+        let count = 0;
+        for (let i = 0; i < this.gridSize; i++) {
+            for (let j = 0; j < this.gridSize; j++) {
+                if (this.grid[i][j] === color) count++;
+            }
+        }
+        return count;
     }
 
     getDotCenter(dot) {
