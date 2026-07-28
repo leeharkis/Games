@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Elite Space Combat</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    background: #000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Courier New', monospace;
+    padding: 10px;
+}
+
+.game-container {
+    display: flex;
+    gap: 20px;
+    width: 100%;
+    max-width: 1200px;
+}
+
+canvas {
+    border: 3px solid #00ff00;
+    background: #000;
+    image-rendering: pixelated;
+    flex: 1;
+}
+
+.hud {
+    background: #001;
+    border: 2px solid #00ff00;
+    color: #00ff00;
+    padding: 15px;
+    font-size: 12px;
+    line-height: 1.6;
+    width: 200px;
+    text-shadow: 0 0 5px #00ff00;
+}
+
+.hud-section {
+    margin-bottom: 15px;
+    border-bottom: 1px solid #00ff00;
+    padding-bottom: 10px;
+}
+
+.hud-label {
+    font-weight: bold;
+    text-decoration: underline;
+}
+
+.hud-value {
+    color: #0f0;
+    font-weight: bold;
+}
+
+.status-good { color: #0f0; }
+.status-warn { color: #ff0; }
+.status-crit { color: #f00; }
+
+.controls {
+    text-align: left;
+    font-size: 11px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid #00ff00;
+}
+
+.controls div {
+    margin: 3px 0;
+}
+
+@media (max-width: 1024px) {
+    .game-container {
+        flex-direction: column;
+    }
+    .hud {
+        width: 100%;
+    }
+}
+</style>
+</head>
+<body>
+
+<div class="game-container">
+    <canvas id="gameCanvas" width="640" height="480"></canvas>
+    <div class="hud" id="hud">
+        <div class="hud-section">
+            <div class="hud-label">STATUS</div>
+            <div>Ship: <span class="hud-value" id="shipStatus">OK</span></div>
+            <div>Hull: <span class="hud-value" id="hull">100</span>%</div>
+            <div>Shield: <span class="hud-value" id="shield">100</span>%</div>
+            <div>Energy: <span class="hud-value" id="energy">100</span>%</div>
+        </div>
+        
+        <div class="hud-section">
+            <div class="hud-label">LOCATION</div>
+            <div>System: <span class="hud-value" id="system">LAVE</span></div>
+            <div>Planet: <span class="hud-value" id="planet">-</span></div>
+        </div>
+
+        <div class="hud-section">
+            <div class="hud-label">CARGO & CREDITS</div>
+            <div>Credits: <span class="hud-value" id="credits">1000</span></div>
+            <div>Cargo: <span class="hud-value" id="cargo">0</span>/10</div>
+        </div>
+
+        <div class="hud-section" id="landingSection" style="display:none;">
+            <div class="hud-label">DOCKING AVAILABLE</div>
+            <div>Press L to land on <span class="hud-value" id="landingPlanet">---</span></div>
+        </div>
+
+        <div class="hud-section">
+            <div class="hud-label">NEARBY</div>
+            <div id="targets">No targets</div>
+        </div>
+
+        <div class="controls">
+            <div><strong>CONTROLS</strong></div>
+            <div>↑↓ - PITCH</div>
+            <div>← → - ROLL</div>
+            <div>W/S - SPEED</div>
+            <div>SPACE - FIRE</div>
+            <div>L - LAND</div>
+            <div>J - JUMP</div>
+        </div>
+    </div>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+class EliteGame {
+    constructor() {
+        this.player = {
+            x: 0, y: 0, z: 0,
+            vx: 0, vy: 0, vz: 0,
+            pitch: 0, roll: 0, yaw: 0,
+            speed: 0, maxSpeed: 10,
+            hull: 100, shield: 100, energy: 100,
+            cargo: 0, credits: 1000,
+            missiles: 4
+        };
+
+        this.input = {
+            up: false, down: false, left: false, right: false,
+            forward: false, backward: false, fire: false,
+            land: false, jump: false
+        };
+
+        this.currentSystem = 'LAVE';
+        this.currentPlanet = null;
+        this.planets = [];
+        this.enemies = [];
+        this.bullets = [];
+        this.explosions = [];
+        this.frameCount = 0;
+        this.gameActive = true;
+
+        this.setupSystem();
+        this.setupControls();
+        this.gameLoop();
+    }
+
+    setupSystem() {
+        this.planets = [
+            { name: 'LAVE', x: 200, y: 150, z: 100, radius: 30, type: 'high-tech' },
+            { name: 'ZAONCE', x: -150, y: -100, z: 200, radius: 25, type: 'industrial' },
+            { name: 'QUATOR', x: 300, y: 50, z: -100, radius: 28, type: 'poor' }
+        ];
+
+        this.enemies = [];
+        for (let i = 0; i < 3; i++) {
+            this.enemies.push({
+                x: Math.random() * 400 - 200,
+                y: Math.random() * 300 - 150,
+                z: Math.random() * 200 + 50,
+                vx: (Math.random() - 0.5) * 3,
+                vy: (Math.random() - 0.5) * 3,
+                vz: (Math.random() - 0.5) * 2,
+                hull: 50,
+                fireTimer: 0,
+                targetAngle: Math.random() * Math.PI * 2
+            });
+        }
+    }
+
+    setupControls() {
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowUp') this.input.up = true;
+            if (e.key === 'ArrowDown') this.input.down = true;
+            if (e.key === 'ArrowLeft') this.input.left = true;
+            if (e.key === 'ArrowRight') this.input.right = true;
+            if (e.key === 'w' || e.key === 'W') this.input.forward = true;
+            if (e.key === 's' || e.key === 'S') this.input.backward = true;
+            if (e.key === ' ') { e.preventDefault(); this.input.fire = true; }
+            if (e.key === 'l' || e.key === 'L') this.input.land = true;
+            if (e.key === 'j' || e.key === 'J') this.input.jump = true;
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (e.key === 'ArrowUp') this.input.up = false;
+            if (e.key === 'ArrowDown') this.input.down = false;
+            if (e.key === 'ArrowLeft') this.input.left = false;
+            if (e.key === 'ArrowRight') this.input.right = false;
+            if (e.key === 'w' || e.key === 'W') this.input.forward = false;
+            if (e.key === 's' || e.key === 'S') this.input.backward = false;
+            if (e.key === ' ') this.input.fire = false;
+            if (e.key === 'l' || e.key === 'L') this.input.land = false;
+            if (e.key === 'j' || e.key === 'J') this.input.jump = false;
+        });
+    }
+
+    update() {
+        // Player input
+        if (this.input.up) this.player.pitch = Math.max(-Math.PI/3, this.player.pitch - 0.05);
+        if (this.input.down) this.player.pitch = Math.min(Math.PI/3, this.player.pitch + 0.05);
+        if (this.input.left) this.player.roll = Math.max(-Math.PI/3, this.player.roll - 0.05);
+        if (this.input.right) this.player.roll = Math.min(Math.PI/3, this.player.roll + 0.05);
+        
+        if (this.input.forward) this.player.speed = Math.min(this.player.maxSpeed, this.player.speed + 0.2);
+        if (this.input.backward) this.player.speed = Math.max(-this.player.maxSpeed/2, this.player.speed - 0.2);
+        
+        this.player.speed *= 0.98; // Friction
+
+        // Movement
+        this.player.x += Math.sin(this.player.yaw) * this.player.speed;
+        this.player.y += Math.sin(this.player.pitch) * this.player.speed;
+        this.player.z += Math.cos(this.player.yaw) * this.player.speed;
+
+        // Energy regeneration
+        this.player.energy = Math.min(100, this.player.energy + 0.5);
+        this.player.shield = Math.min(100, this.player.shield + 0.2);
+
+        // Update enemies
+        for (let i = 0; i < this.enemies.length; i++) {
+            let e = this.enemies[i];
+            
+            // Move towards player
+            let dx = this.player.x - e.x;
+            let dy = this.player.y - e.y;
+            let dz = this.player.z - e.z;
+            let dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+            
+            if (dist > 0) {
+                e.vx += (dx / dist) * 0.1;
+                e.vy += (dy / dist) * 0.1;
+                e.vz += (dz / dist) * 0.08;
+            }
+
+            e.x += e.vx;
+            e.y += e.vy;
+            e.z += e.vz;
+
+            e.vx *= 0.95;
+            e.vy *= 0.95;
+            e.vz *= 0.95;
+
+            // Enemy fire
+            e.fireTimer++;
+            if (e.fireTimer > 60 && dist < 300) {
+                this.bullets.push({
+                    x: e.x, y: e.y, z: e.z,
+                    vx: e.vx + (dx / dist) * 5,
+                    vy: e.vy + (dy / dist) * 5,
+                    vz: e.vz + (dz / dist) * 4,
+                    owner: 'enemy'
+                });
+                e.fireTimer = 0;
+            }
+        }
+
+        // Player fire
+        if (this.input.fire && this.player.energy > 5) {
+            this.bullets.push({
+                x: this.player.x,
+                y: this.player.y,
+                z: this.player.z + 10,
+                vx: this.player.vx + Math.sin(this.player.yaw) * 8,
+                vy: this.player.vy,
+                vz: this.player.vz + Math.cos(this.player.yaw) * 8,
+                owner: 'player'
+            });
+            this.player.energy -= 5;
+        }
+
+        // Update bullets and check collisions
+        for (let i = this.bullets.length - 1; i >= 0; i--) {
+            let b = this.bullets[i];
+            b.x += b.vx;
+            b.y += b.vy;
+            b.z += b.vz;
+
+            // Remove if too far
+            if (Math.abs(b.x) > 1000 || Math.abs(b.y) > 1000 || Math.abs(b.z) > 1000) {
+                this.bullets.splice(i, 1);
+                continue;
+            }
+
+            // Check enemy hits
+            if (b.owner === 'player') {
+                for (let j = 0; j < this.enemies.length; j++) {
+                    let e = this.enemies[j];
+                    let dx = b.x - e.x;
+                    let dy = b.y - e.y;
+                    let dz = b.z - e.z;
+                    let d = Math.sqrt(dx*dx + dy*dy + dz*dz);
+                    
+                    if (d < 15) {
+                        e.hull -= 15;
+                        this.explosions.push({ x: b.x, y: b.y, z: b.z, life: 30 });
+                        this.bullets.splice(i, 1);
+                        
+                        if (e.hull <= 0) {
+                            this.enemies.splice(j, 1);
+                            this.player.credits += 100;
+                        }
+                        break;
+                    }
+                }
+            } else {
+                // Check player hit
+                let dx = b.x - this.player.x;
+                let dy = b.y - this.player.y;
+                let dz = b.z - this.player.z;
+                let d = Math.sqrt(dx*dx + dy*dy + dz*dz);
+                
+                if (d < 20) {
+                    if (this.player.shield > 0) {
+                        this.player.shield = Math.max(0, this.player.shield - 20);
+                    } else {
+                        this.player.hull = Math.max(0, this.player.hull - 15);
+                    }
+                    this.explosions.push({ x: b.x, y: b.y, z: b.z, life: 20 });
+                    this.bullets.splice(i, 1);
+                }
+            }
+        }
+
+        // Update explosions
+        this.explosions = this.explosions.filter(e => {
+            e.life--;
+            return e.life > 0;
+        });
+
+        // Regenerate enemy if killed all
+        if (this.enemies.length === 0) {
+            this.setupSystem();
+        }
+    }
+
+    render3D() {
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Draw crosshair
+        ctx.strokeStyle = '#0f0';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(canvas.width/2, canvas.height/2, 10, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Draw sight
+        ctx.beginPath();
+        ctx.moveTo(canvas.width/2 - 5, canvas.height/2);
+        ctx.lineTo(canvas.width/2 + 5, canvas.height/2);
+        ctx.moveTo(canvas.width/2, canvas.height/2 - 5);
+        ctx.lineTo(canvas.width/2, canvas.height/2 + 5);
+        ctx.stroke();
+
+        // Project 3D to 2D
+        const project = (x, y, z) => {
+            let scale = 400 / (z + 300);
+            return {
+                x: canvas.width/2 + x * scale,
+                y: canvas.height/2 - y * scale,
+                scale: scale
+            };
+        };
+
+        // Draw planets
+        for (let p of this.planets) {
+            let proj = project(p.x - this.player.x, p.y - this.player.y, p.z - this.player.z);
+            
+            if (proj.scale > 0) {
+                ctx.fillStyle = '#00ff00';
+                ctx.beginPath();
+                ctx.arc(proj.x, proj.y, p.radius * proj.scale * 0.5, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.fillStyle = '#0f0';
+                ctx.font = '12px monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(p.name, proj.x, proj.y - p.radius * proj.scale * 0.7);
+            }
+        }
+
+        // Draw enemies
+        for (let e of this.enemies) {
+            let proj = project(e.x - this.player.x, e.y - this.player.y, e.z - this.player.z);
+            
+            if (proj.scale > 0 && proj.x > 0 && proj.x < canvas.width && proj.y > 0 && proj.y < canvas.height) {
+                ctx.strokeStyle = '#ff0000';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(proj.x - 8*proj.scale, proj.y);
+                ctx.lineTo(proj.x + 8*proj.scale, proj.y);
+                ctx.moveTo(proj.x, proj.y - 8*proj.scale);
+                ctx.lineTo(proj.x, proj.y + 8*proj.scale);
+                ctx.stroke();
+            }
+        }
+
+        // Draw bullets
+        for (let b of this.bullets) {
+            let proj = project(b.x - this.player.x, b.y - this.player.y, b.z - this.player.z);
+            
+            if (proj.scale > 0 && proj.x > 0 && proj.x < canvas.width && proj.y > 0 && proj.y < canvas.height) {
+                ctx.fillStyle = b.owner === 'player' ? '#ffff00' : '#ff8800';
+                ctx.beginPath();
+                ctx.arc(proj.x, proj.y, 2, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        // Draw explosions
+        for (let ex of this.explosions) {
+            let proj = project(ex.x - this.player.x, ex.y - this.player.y, ex.z - this.player.z);
+            
+            if (proj.scale > 0) {
+                ctx.fillStyle = `rgba(255, ${Math.random() * 128}, 0, ${ex.life/30})`;
+                ctx.beginPath();
+                ctx.arc(proj.x, proj.y, 20 * (1 - ex.life/30), 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+    }
+
+    updateHUD() {
+        document.getElementById('hull').textContent = Math.floor(this.player.hull);
+        document.getElementById('shield').textContent = Math.floor(this.player.shield);
+        document.getElementById('energy').textContent = Math.floor(this.player.energy);
+        document.getElementById('credits').textContent = this.player.credits;
+        document.getElementById('cargo').textContent = this.player.cargo;
+
+        let status = 'OK';
+        if (this.player.hull < 30) status = 'CRITICAL';
+        else if (this.player.hull < 60) status = 'DAMAGED';
+        document.getElementById('shipStatus').textContent = status;
+
+        let targets = '';
+        for (let e of this.enemies.slice(0, 3)) {
+            let dx = e.x - this.player.x;
+            let dy = e.y - this.player.y;
+            let dz = e.z - this.player.z;
+            let dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+            targets += `<div>Pirate: ${Math.floor(dist)}m</div>`;
+        }
+        if (targets === '') targets = '<div>No targets</div>';
+        document.getElementById('targets').innerHTML = targets;
+    }
+
+    gameLoop() {
+        this.update();
+        this.checkLanding();
+        this.render3D();
+        this.updateHUD();
+
+        if (this.gameActive) {
+            requestAnimationFrame(() => this.gameLoop());
+        }
+    }
+
+    checkLanding() {
+        let nearbyPlanet = null;
+        
+        for (let p of this.planets) {
+            let dx = p.x - this.player.x;
+            let dy = p.y - this.player.y;
+            let dz = p.z - this.player.z;
+            let dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+            
+            if (dist < 80) {
+                nearbyPlanet = p;
+                break;
+            }
+        }
+
+        if (nearbyPlanet) {
+            document.getElementById('landingSection').style.display = 'block';
+            document.getElementById('landingPlanet').textContent = nearbyPlanet.name;
+            
+            if (this.input.land) {
+                this.land(nearbyPlanet);
+                this.input.land = false;
+            }
+        } else {
+            document.getElementById('landingSection').style.display = 'none';
+        }
+    }
+
+    land(planet) {
+        this.currentPlanet = planet.name;
+        this.showTradeMenu(planet);
+    }
+
+    showTradeMenu(planet) {
+        let menu = `DOCKED AT ${planet.name}\n\n`;
+        menu += `Credits: ${this.player.credits}\n`;
+        menu += `Cargo: ${this.player.cargo}/10\n\n`;
+        menu += `1. BUY MISSILES (100cr)\n`;
+        menu += `2. REPAIR HULL (200cr)\n`;
+        menu += `3. RECHARGE SHIELDS (150cr)\n`;
+        menu += `4. REFUEL (100cr)\n`;
+        menu += `5. LEAVE\n`;
+
+        let choice = prompt(menu);
+
+        if (choice === '1' && this.player.credits >= 100) {
+            this.player.missiles += 2;
+            this.player.credits -= 100;
+        } else if (choice === '2' && this.player.credits >= 200) {
+            this.player.hull = 100;
+            this.player.credits -= 200;
+        } else if (choice === '3' && this.player.credits >= 150) {
+            this.player.shield = 100;
+            this.player.credits -= 150;
+        } else if (choice === '4' && this.player.credits >= 100) {
+            this.player.energy = 100;
+            this.player.credits -= 100;
+        }
+
+        this.currentPlanet = null;
+        this.player.z -= 200; // Move away from planet
+    }
+}
+
+const game = new EliteGame();
+</script>
+
+</body>
+</html>
