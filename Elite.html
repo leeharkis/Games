@@ -193,13 +193,16 @@ class EliteGame {
 
     setupControls() {
         document.addEventListener('keydown', (e) => {
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
+                e.preventDefault();
+            }
             if (e.key === 'ArrowUp') this.input.up = true;
             if (e.key === 'ArrowDown') this.input.down = true;
             if (e.key === 'ArrowLeft') this.input.left = true;
             if (e.key === 'ArrowRight') this.input.right = true;
             if (e.key === 'w' || e.key === 'W') this.input.forward = true;
             if (e.key === 's' || e.key === 'S') this.input.backward = true;
-            if (e.key === ' ') { e.preventDefault(); this.input.fire = true; }
+            if (e.key === ' ') this.input.fire = true;
             if (e.key === 'l' || e.key === 'L') this.input.land = true;
             if (e.key === 'j' || e.key === 'J') this.input.jump = true;
         });
