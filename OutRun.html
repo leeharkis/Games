@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OutRun</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+    background:#000;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    min-height:100vh;
+    font-family:'Courier New',monospace;
+    user-select:none;
+    overflow:hidden;
+}
+canvas { display:block; cursor:default; }
+</style>
+</head>
+<body>
+<canvas id="c" width="640" height="480"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+const W = 640, H = 480;
+
+// ─── Core constants ────────────────────────────────────────────────────
+const SEG_LEN      = 100;       // world units per segment
+const TRACK_SEGS   = 1600;      // total segments in track (loops)
+const DRAW_DIST    = 150;       // segments to draw ahead
+const CAM_H        = 1500;      // camera height above road (world units)
+const CAM_DEPTH    = 0.84;      // focal depth — controls FOV
+const ROAD_W       = 3000;      // road half-width in world units
+const HORIZON      = Math.floor(H * 0.42);  // y pixel where horizon sits
+
+// ─── Colours ──────────────────────────────────────────────────────────
+const C = {
+    grass:   ['#5dbb63','#4aa34f'],
+    road:    ['#898989','#787878'],
+    rumble:  ['#ffffff','#dd1111'],
+    lane:    '#cccccc',
+    treeTrunk:'#7a4e2d',
+    treeLeaf: '#1e6e1e',
+};
+
+// ─── Track builder ────────────────────────────────────────────────────
+// curve: lateral bend per segment (world units added to x accumulator)
+// hill:  vertical rise per segment
+let segs = [];
+
+function addSegments(count, curve, hill) {
+    for (let i = 0; i < count; i++) {
+        segs.push({ curve, hill, tree: (segs.length % 10 === 0), checkpoint: false, _hit: false });
+    }
+}
+
+function buildTrack() {
+    segs = [];
+    addSegments(60,  0,    0   );  // straight start
+    addSegments(30,  0.5,  0   );  // gentle right
+    addSegments(25, -0.7,  0   );  // left
+    addSegments(20,  0,    6   );  // hill up
+    addSegments(30,  0.8,  0   );  // right on flat
+    addSegments(25,  0,   -5   );  // dip
+    addSegments(20, -1.0,  0   );  // sharp left
+    addSegments(40,  0,    0   );  // straight
+    addSegments(25,  0.7,  5   );  // right uphill
+    addSegments(20,  0,   -7   );  // over crest
+    addSegments(30, -0.5,  0   );  // gentle left
+    addSegments(30,  0,    0   );  // straight
+    addSegments(35,  1.0,  4   );  // long right uphill
+    addSegments(20,  0,   -4   );
+    addSegments(30, -0.8,  0   );
+    addSegments(50,  0,    0   );  // long straight
+    addSegments(25,  0.6,  0   );
+    addSegments(25, -0.6,  3   );
+    addSegments(20,  0,   -3   );
+    addSegments(100, 0,    0   );  // long final straight
+
+    // Pad / loop to TRACK_SEGS
+    while (segs.length < TRACK_SEGS) {
+        const s = segs[segs.length % (segs.length || 1)];
+        segs.push({ curve: s ? s.curve * 0.5 : 0, hill: 0, tree: (segs.length % 10 === 0), checkpoint: false, _hit: false });
+    }
+    segs.length = TRACK_SEGS;
+
+    // Mark checkpoints every 200 segments
+    for (let i = 200; i < TRACK_SEGS; i += 200) segs[i].checkpoint = true;
+}
+
+// ─── Player ───────────────────────────────────────────────────────────
+let player;
+function initPlayer() {
+    player = {
+        pos:      0,        // position along track (world units, 0..TRACK_SEGS*SEG_LEN)
+        x:        0,        // lateral offset (-1=left edge, +1=right edge, 0=centre)
+        speed:    0,
+        maxSpeed: 400,
+        dx:       0,        // lateral velocity
+        gear:     1,
+    };
+}
+
+// ─── Traffic ──────────────────────────────────────────────────────────
+const TCOLS = ['#cc0000','#ddbb00','#ee7700','#00aaee','#cc00cc','#ffffff','#00cc66'];
+let traffic = [];
+function initTraffic() {
+    traffic = [];
+    for (let i = 0; i < 50; i++) {
+        traffic.push({
+            pos:    (500 + Math.random() * (TRACK_SEGS * SEG_LEN - 600)),
+            x:      (Math.random() * 1.2 - 0.6),
+            speed:  40 + Math.random() * 80,
+            color:  TCOLS[Math.floor(Math.random() * TCOLS.length)],
+        });
+    }
+}
+
+// ─── Game state ───────────────────────────────────────────────────────
+let phase = 'title';
+let timer, totalTime, checkpoints, score, lastTS;
+let highScore = parseInt(localStorage.getItem('outrunHi') || '0');
+let keys = {};
+
+window.addEventListener('keydown', e => {
+    keys[e.key] = true;
+    if ([' ','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
+    if (phase !== 'playing' && (e.key === ' ' || e.key === 'Enter')) startGame();
+});
+window.addEventListener('keyup', e => keys[e.key] = false);
+canvas.addEventListener('click', () => { if (phase !== 'playing') startGame(); });
+
+function startGame() {
+    buildTrack();
+    initPlayer();
+    initTraffic();
+    timer = 50; totalTime = 0; checkpoints = 0; score = 0;
+    phase = 'playing';
+}
+
+// ─── Update ───────────────────────────────────────────────────────────
+function update(dt) {
+    if (phase !== 'playing') return;
+
+    timer -= dt;
+    if (timer <= 0) { timer = 0; phase = 'gameover'; if (score > highScore) { highScore = score; localStorage.setItem('outrunHi', highScore); } return; }
+    totalTime += dt;
+
+    const sp = player.speed / player.maxSpeed;
+
+    // Acceleration
+    if (keys['ArrowUp']   || keys['w'] || keys['W']) player.speed = Math.min(player.maxSpeed, player.speed + 200 * dt);
+    else if (keys['ArrowDown'] || keys['s'] || keys['S']) player.speed = Math.max(0, player.speed - 280 * dt);
+    else player.speed = Math.max(0, player.speed - 80 * dt);
+
+    // Steering
+    if (keys['ArrowLeft']  || keys['a'] || keys['A']) player.dx -= (3 + 2*sp) * dt;
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) player.dx += (3 + 2*sp) * dt;
+    player.dx *= 0.88;
+    player.x  += player.dx * sp;
+
+    // Current segment curve pushes car
+    const si = Math.floor(player.pos / SEG_LEN) % TRACK_SEGS;
+    player.x -= segs[si].curve * sp * 0.5 * dt * 60;
+
+    // Off road
+    if (Math.abs(player.x) > 1.2) {
+        player.speed = Math.max(0, player.speed - 300 * dt);
+        player.dx *= 0.6;
+    }
+    player.x = Math.max(-2.5, Math.min(2.5, player.x));
+
+    // Advance
+    player.pos += player.speed * dt;
+    const trackLen = TRACK_SEGS * SEG_LEN;
+    if (player.pos >= trackLen) player.pos -= trackLen;
+
+    player.gear = player.speed < 100 ? 1 : player.speed < 200 ? 2 : player.speed < 300 ? 3 : 4;
+
+    // Checkpoint
+    const curSeg = segs[si];
+    if (curSeg.checkpoint && !curSeg._hit) {
+        curSeg._hit = true;
+        timer = Math.min(timer + 15, 70);
+        checkpoints++;
+        score += 1500 * checkpoints;
+    }
+    score += Math.floor(player.speed * dt * 0.5);
+
+    // Traffic
+    for (const car of traffic) {
+        car.pos += car.speed * dt;
+        if (car.pos >= trackLen) car.pos -= trackLen;
+        const dz = player.pos - car.pos;
+        if (dz > 0 && dz < SEG_LEN * 4 && Math.abs(player.x - car.x) < 0.55) {
+            player.speed = Math.max(0, player.speed * 0.4);
+            player.dx = -player.dx * 0.5;
+        }
+    }
+}
+
+// ─── Renderer ─────────────────────────────────────────────────────────
+// This is the classic pseudo-3D road algorithm:
+// For each segment i ahead of the player, compute its projected screen Y
+// using a simple perspective: screenY = horizon - (CAM_H / (i * SEG_LEN)) * projection
+// The key: we accumulate curve and hill offsets as we scan forward so the
+// road bends correctly.
+
+function project(segDist, worldX, worldY) {
+    // segDist = distance ahead in world units
+    const scale = CAM_DEPTH / (segDist / SEG_LEN);
+    const screenX = (W / 2) + scale * (worldX - player.x * ROAD_W) * (W / 2) / ROAD_W;
+    const screenY = HORIZON  + scale * (CAM_H - worldY) * (H / 2) / CAM_H;
+    const roadW   = scale * ROAD_W * W / ROAD_W;
+    return { x: screenX, y: screenY, w: roadW, scale };
+}
+
+function trapezoid(x1, y1, w1, x2, y2, w2, color) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(x1 - w1, y1);
+    ctx.lineTo(x1 + w1, y1);
+    ctx.lineTo(x2 + w2, y2);
+    ctx.lineTo(x2 - w2, y2);
+    ctx.closePath();
+    ctx.fill();
+}
+
+function render() {
+    // Sky
+    const sky = ctx.createLinearGradient(0, 0, 0, HORIZON);
+    sky.addColorStop(0, '#1565c0');
+    sky.addColorStop(1, '#64b5f6');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, W, HORIZON);
+
+    // Sun
+    ctx.fillStyle = '#fffde7';
+    ctx.beginPath(); ctx.arc(W * 0.75, HORIZON * 0.35, 36, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,253,200,0.25)';
+    ctx.beginPath(); ctx.arc(W * 0.75, HORIZON * 0.35, 52, 0, Math.PI*2); ctx.fill();
+
+    // Ground below horizon (will be overwritten by road segments)
+    ctx.fillStyle = C.grass[0];
+    ctx.fillRect(0, HORIZON, W, H - HORIZON);
+
+    if (phase !== 'playing') { drawOverlay(); return; }
+
+    const startSeg = Math.floor(player.pos / SEG_LEN);
+    const segOffset = (player.pos % SEG_LEN) / SEG_LEN; // 0..1 sub-segment position
+
+    // Accumulate curve/hill as we scan forward
+    let camX = 0;   // accumulated lateral offset from curves (screen space)
+    let camY = 0;   // accumulated vertical offset from hills
+
+    let prevProj = null;
+    const sprites = [];  // { depth, x, y, scale, type, color }
+
+    for (let i = 0; i < DRAW_DIST; i++) {
+        const si  = (startSeg + i) % TRACK_SEGS;
+        const seg = segs[si];
+
+        // Distance from camera to this segment (in world units)
+        // Subtract partial offset so road flows smoothly under the car
+        const dist = (i + 1 - segOffset) * SEG_LEN;
+
+        const proj = project(dist, camX, camY);
+
+        // Accumulate curve and hill AFTER projection (affects further segments)
+        camX += seg.curve * 60 / (i + 1);
+        camY += seg.hill  * 0.4 / (i + 1);
+
+        // Only draw if on screen and in front of previous segment
+        if (i > 0 && prevProj && proj.y < H && proj.y > HORIZON && proj.y < prevProj.y) {
+            const even = Math.floor(si / 3) % 2 === 0;
+            const gi   = even ? 0 : 1;
+
+            // Grass
+            ctx.fillStyle = C.grass[gi];
+            ctx.fillRect(0, proj.y, W, prevProj.y - proj.y);
+
+            // Rumble
+            trapezoid(prevProj.x, prevProj.y, prevProj.w * 1.18,
+                      proj.x,     proj.y,     proj.w     * 1.18, C.rumble[gi]);
+
+            // Road
+            trapezoid(prevProj.x, prevProj.y, prevProj.w,
+                      proj.x,     proj.y,     proj.w,     C.road[gi]);
+
+            // Centre lane dash
+            if (even) {
+                trapezoid(prevProj.x, prevProj.y, prevProj.w * 0.015,
+                          proj.x,     proj.y,     proj.w     * 0.015, C.lane);
+            }
+
+            // Checkpoint stripe
+            if (seg.checkpoint && !seg._hit) {
+                trapezoid(prevProj.x, prevProj.y, prevProj.w,
+                          proj.x,     proj.y,     proj.w, 'rgba(255,255,255,0.45)');
+            }
+        }
+
+        // Collect roadside sprites
+        if (seg.tree && prevProj) {
+            // Both sides
+            sprites.push({ depth: i, x: prevProj.x - prevProj.w * 2.0, y: prevProj.y, scale: prevProj.scale, type: 'tree' });
+            sprites.push({ depth: i, x: prevProj.x + prevProj.w * 2.0, y: prevProj.y, scale: prevProj.scale, type: 'tree' });
+        }
+
+        // Collect traffic sprites
+        for (const car of traffic) {
+            const carSi = Math.floor(car.pos / SEG_LEN) % TRACK_SEGS;
+            if (carSi === si && prevProj) {
+                const cx = prevProj.x + (car.x * prevProj.w);
+                sprites.push({ depth: i, x: cx, y: prevProj.y, scale: prevProj.scale, type: 'car', color: car.color });
+            }
+        }
+
+        prevProj = { x: proj.x, y: proj.y, w: proj.w, scale: proj.scale };
+    }
+
+    // Draw sprites far-to-near
+    sprites.sort((a, b) => b.depth - a.depth);
+    for (const s of sprites) drawSprite(s);
+
+    // Player car
+    drawPlayerCar();
+    drawHUD();
+}
+
+function drawSprite(s) {
+    if (s.scale <= 0.004) return;
+    const { x, y, scale, type, color } = s;
+    if (type === 'tree') {
+        const th = Math.max(4, 60 * scale);
+        const tw = Math.max(2, 10 * scale);
+        const cr = Math.max(3, 36 * scale);
+        ctx.fillStyle = C.treeTrunk;
+        ctx.fillRect(x - tw/2, y - th, tw, th);
+        ctx.fillStyle = C.treeLeaf;
+        ctx.beginPath(); ctx.arc(x, y - th, cr, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#2d8c2d';
+        ctx.beginPath(); ctx.arc(x - cr*0.4, y - th - cr*0.3, cr*0.7, 0, Math.PI*2); ctx.fill();
+    } else if (type === 'car') {
+        const cw = Math.max(8, 52 * scale);
+        const ch = Math.max(5, 28 * scale);
+        ctx.fillStyle = color;
+        ctx.fillRect(x - cw/2, y - ch, cw, ch);
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(x - cw*0.28, y - ch*1.5, cw*0.56, ch*0.55);
+        ctx.fillStyle = 'rgba(140,200,220,0.6)';
+        ctx.fillRect(x - cw*0.22, y - ch*1.44, cw*0.18, ch*0.44);
+        ctx.fillRect(x + cw*0.04, y - ch*1.44, cw*0.18, ch*0.44);
+    }
+}
+
+function drawPlayerCar() {
+    const x = W / 2;
+    const y = H - 72;
+    const steer = player.dx * 300;
+    const cw = 88, ch = 38;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath(); ctx.ellipse(x + steer*0.3, y + 6, 38, 8, 0, 0, Math.PI*2); ctx.fill();
+
+    ctx.fillStyle = '#dd0008';
+    ctx.fillRect(x - cw/2 + steer, y - ch, cw, ch);
+
+    ctx.fillStyle = '#aa0005';
+    ctx.fillRect(x - cw*0.35 + steer, y - ch*1.58, cw*0.7, ch*0.62);
+
+    ctx.fillStyle = 'rgba(140,210,230,0.7)';
+    ctx.fillRect(x - cw*0.27 + steer, y - ch*1.5,  cw*0.22, ch*0.5);
+    ctx.fillRect(x + cw*0.05 + steer, y - ch*1.5,  cw*0.22, ch*0.5);
+
+    ctx.fillStyle = '#111';
+    ctx.fillRect(x - cw*0.48 + steer, y - 10, 20, 12);
+    ctx.fillRect(x + cw*0.26 + steer, y - 10, 20, 12);
+    ctx.fillStyle = '#555';
+    ctx.fillRect(x - cw*0.44 + steer, y - 8, 12, 8);
+    ctx.fillRect(x + cw*0.30 + steer, y - 8, 12, 8);
+}
+
+function drawHUD() {
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, H - 46, W, 46);
+
+    // Speed bar
+    const spd = Math.floor(player.speed);
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(8, H - 32, 165, 20);
+    const bc = player.speed > player.maxSpeed * 0.85 ? '#ff3300' : player.speed > player.maxSpeed * 0.55 ? '#ffaa00' : '#00cc44';
+    ctx.fillStyle = bc;
+    ctx.fillRect(8, H - 32, Math.floor(165 * player.speed / player.maxSpeed), 20);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 13px Courier New';
+    ctx.textAlign = 'left';
+    ctx.fillText(`${spd} km/h  G${player.gear}`, 12, H - 17);
+
+    // Timer
+    const tc = timer < 10 ? '#ff3333' : timer < 20 ? '#ffaa00' : '#fff';
+    ctx.fillStyle = tc;
+    ctx.font = 'bold 24px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText(Math.ceil(timer).toString().padStart(2,'0'), W/2, H - 14);
+    ctx.fillStyle = '#888';
+    ctx.font = '10px Courier New';
+    ctx.fillText('TIME', W/2, H - 34);
+
+    // Score
+    ctx.fillStyle = '#ffdd00';
+    ctx.font = 'bold 14px Courier New';
+    ctx.textAlign = 'right';
+    ctx.fillText(score.toString().padStart(8,'0'), W - 8, H - 15);
+    ctx.fillStyle = '#888';
+    ctx.font = '10px Courier New';
+    ctx.fillText('SCORE', W - 8, H - 33);
+
+    // Off-road
+    if (Math.abs(player.x) > 1.2) {
+        ctx.fillStyle = `rgba(255,80,0,${0.6 + 0.4*Math.sin(Date.now()/80)})`;
+        ctx.font = 'bold 18px Courier New';
+        ctx.textAlign = 'center';
+        ctx.fillText('OFF ROAD!', W/2, 28);
+    }
+}
+
+function drawOverlay() {
+    if (phase === 'title') {
+        ctx.fillStyle = 'rgba(0,0,0,0.65)';
+        ctx.fillRect(W/2-200, H/2-105, 400, 210);
+        ctx.strokeStyle = '#dd0008'; ctx.lineWidth = 3;
+        ctx.strokeRect(W/2-200, H/2-105, 400, 210);
+
+        ctx.fillStyle = '#dd0008';
+        ctx.font = 'bold 58px Courier New';
+        ctx.textAlign = 'center';
+        ctx.fillText('OUTRUN', W/2, H/2 - 40);
+
+        ctx.fillStyle = '#ffdd00';
+        ctx.font = '13px Courier New';
+        ctx.fillText('↑ / W  Accelerate     ↓ / S  Brake', W/2, H/2 + 2);
+        ctx.fillText('← / A  Left            → / D  Right', W/2, H/2 + 22);
+        ctx.fillText('Hit checkpoints for +15 seconds', W/2, H/2 + 48);
+
+        ctx.fillStyle = '#aaa';
+        ctx.font = '13px Courier New';
+        ctx.fillText('BEST  ' + highScore.toString().padStart(8,'0'), W/2, H/2 + 70);
+
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 14px Courier New';
+        ctx.fillText('Click or SPACE to race', W/2, H/2 + 94);
+
+    } else if (phase === 'gameover') {
+        ctx.fillStyle = 'rgba(0,0,0,0.72)';
+        ctx.fillRect(W/2-190, H/2-95, 380, 190);
+        ctx.strokeStyle = '#ff3333'; ctx.lineWidth = 2;
+        ctx.strokeRect(W/2-190, H/2-95, 380, 190);
+
+        ctx.fillStyle = '#ff3333';
+        ctx.font = 'bold 40px Courier New';
+        ctx.textAlign = 'center';
+        ctx.fillText('TIME OVER', W/2, H/2 - 38);
+
+        ctx.fillStyle = '#ffdd00';
+        ctx.font = '17px Courier New';
+        ctx.fillText('SCORE  ' + score.toString().padStart(8,'0'), W/2, H/2 + 2);
+        ctx.fillStyle = '#aaa';
+        ctx.font = '13px Courier New';
+        ctx.fillText('BEST   ' + highScore.toString().padStart(8,'0'), W/2, H/2 + 26);
+
+        ctx.fillStyle = '#fff';
+        ctx.font = '13px Courier New';
+        ctx.fillText('Click or SPACE to retry', W/2, H/2 + 62);
+    }
+}
+
+// ─── Loop ─────────────────────────────────────────────────────────────
+function loop(ts) {
+    const dt = Math.min((ts - (lastTS || ts)) / 1000, 0.05);
+    lastTS = ts;
+    update(dt);
+    render();
+    requestAnimationFrame(loop);
+}
+
+buildTrack();
+initPlayer();
+initTraffic();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

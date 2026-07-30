@@ -30,6 +30,7 @@ canvas {
     background: #000;
     image-rendering: pixelated;
     flex: 1;
+    outline: none;
 }
 
 .hud {
@@ -88,7 +89,7 @@ canvas {
 <body>
 
 <div class="game-container">
-    <canvas id="gameCanvas" width="640" height="480"></canvas>
+    <canvas id="gameCanvas" width="640" height="480" tabindex="0"></canvas>
     <div class="hud" id="hud">
         <div class="hud-section">
             <div class="hud-label">STATUS</div>
@@ -192,50 +193,59 @@ class EliteGame {
     }
 
     setupControls() {
-        document.addEventListener('keydown', (e) => {
+        // Attach to window — works immediately without requiring focus on any element
+        window.addEventListener('keydown', (e) => {
             if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
                 e.preventDefault();
             }
-            if (e.key === 'ArrowUp') this.input.up = true;
-            if (e.key === 'ArrowDown') this.input.down = true;
-            if (e.key === 'ArrowLeft') this.input.left = true;
-            if (e.key === 'ArrowRight') this.input.right = true;
-            if (e.key === 'w' || e.key === 'W') this.input.forward = true;
-            if (e.key === 's' || e.key === 'S') this.input.backward = true;
-            if (e.key === ' ') this.input.fire = true;
-            if (e.key === 'l' || e.key === 'L') this.input.land = true;
-            if (e.key === 'j' || e.key === 'J') this.input.jump = true;
-        });
+            switch (e.key) {
+                case 'ArrowUp':    this.input.up = true; break;
+                case 'ArrowDown':  this.input.down = true; break;
+                case 'ArrowLeft':  this.input.left = true; break;
+                case 'ArrowRight': this.input.right = true; break;
+                case 'w': case 'W': this.input.forward = true; break;
+                case 's': case 'S': this.input.backward = true; break;
+                case ' ':          this.input.fire = true; break;
+                case 'l': case 'L': this.input.land = true; break;
+                case 'j': case 'J': this.input.jump = true; break;
+            }
+        }, { capture: true });
 
-        document.addEventListener('keyup', (e) => {
-            if (e.key === 'ArrowUp') this.input.up = false;
-            if (e.key === 'ArrowDown') this.input.down = false;
-            if (e.key === 'ArrowLeft') this.input.left = false;
-            if (e.key === 'ArrowRight') this.input.right = false;
-            if (e.key === 'w' || e.key === 'W') this.input.forward = false;
-            if (e.key === 's' || e.key === 'S') this.input.backward = false;
-            if (e.key === ' ') this.input.fire = false;
-            if (e.key === 'l' || e.key === 'L') this.input.land = false;
-            if (e.key === 'j' || e.key === 'J') this.input.jump = false;
-        });
+        window.addEventListener('keyup', (e) => {
+            switch (e.key) {
+                case 'ArrowUp':    this.input.up = false; break;
+                case 'ArrowDown':  this.input.down = false; break;
+                case 'ArrowLeft':  this.input.left = false; break;
+                case 'ArrowRight': this.input.right = false; break;
+                case 'w': case 'W': this.input.forward = false; break;
+                case 's': case 'S': this.input.backward = false; break;
+                case ' ':          this.input.fire = false; break;
+                case 'l': case 'L': this.input.land = false; break;
+                case 'j': case 'J': this.input.jump = false; break;
+            }
+        }, { capture: true });
     }
 
     update() {
-        // Player input
-        if (this.input.up) this.player.pitch = Math.max(-Math.PI/3, this.player.pitch - 0.05);
-        if (this.input.down) this.player.pitch = Math.min(Math.PI/3, this.player.pitch + 0.05);
-        if (this.input.left) this.player.roll = Math.max(-Math.PI/3, this.player.roll - 0.05);
-        if (this.input.right) this.player.roll = Math.min(Math.PI/3, this.player.roll + 0.05);
-        
-        if (this.input.forward) this.player.speed = Math.min(this.player.maxSpeed, this.player.speed + 0.2);
-        if (this.input.backward) this.player.speed = Math.max(-this.player.maxSpeed/2, this.player.speed - 0.2);
-        
+        // Player input — roll drives yaw (turning), pitch drives vertical aim
+        if (this.input.up)    this.player.pitch -= 0.04;
+        if (this.input.down)  this.player.pitch += 0.04;
+        if (this.input.left)  this.player.yaw   -= 0.04;
+        if (this.input.right) this.player.yaw   += 0.04;
+
+        // Clamp pitch
+        this.player.pitch = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, this.player.pitch));
+
+        if (this.input.forward)  this.player.speed = Math.min(this.player.maxSpeed, this.player.speed + 0.3);
+        if (this.input.backward) this.player.speed = Math.max(0, this.player.speed - 0.3);
+
         this.player.speed *= 0.98; // Friction
 
-        // Movement
-        this.player.x += Math.sin(this.player.yaw) * this.player.speed;
-        this.player.y += Math.sin(this.player.pitch) * this.player.speed;
-        this.player.z += Math.cos(this.player.yaw) * this.player.speed;
+        // Movement — fly in the direction the ship is pointing
+        const cosPitch = Math.cos(this.player.pitch);
+        this.player.x += Math.sin(this.player.yaw) * cosPitch * this.player.speed;
+        this.player.y -= Math.sin(this.player.pitch) * this.player.speed;
+        this.player.z += Math.cos(this.player.yaw) * cosPitch * this.player.speed;
 
         // Energy regeneration
         this.player.energy = Math.min(100, this.player.energy + 0.5);
@@ -281,13 +291,14 @@ class EliteGame {
 
         // Player fire
         if (this.input.fire && this.player.energy > 5) {
+            const cosPitch = Math.cos(this.player.pitch);
             this.bullets.push({
                 x: this.player.x,
                 y: this.player.y,
-                z: this.player.z + 10,
-                vx: this.player.vx + Math.sin(this.player.yaw) * 8,
-                vy: this.player.vy,
-                vz: this.player.vz + Math.cos(this.player.yaw) * 8,
+                z: this.player.z,
+                vx: Math.sin(this.player.yaw) * cosPitch * 15,
+                vy: -Math.sin(this.player.pitch) * 15,
+                vz: Math.cos(this.player.yaw) * cosPitch * 15,
                 owner: 'player'
             });
             this.player.energy -= 5;
@@ -377,9 +388,11 @@ class EliteGame {
         ctx.lineTo(canvas.width/2, canvas.height/2 + 5);
         ctx.stroke();
 
-        // Project 3D to 2D
+        // Project 3D to 2D — returns null if behind the camera
         const project = (x, y, z) => {
-            let scale = 400 / (z + 300);
+            const depth = z + 300;
+            if (depth <= 0) return null; // behind camera, don't render
+            let scale = 400 / depth;
             return {
                 x: canvas.width/2 + x * scale,
                 y: canvas.height/2 - y * scale,
@@ -391,16 +404,16 @@ class EliteGame {
         for (let p of this.planets) {
             let proj = project(p.x - this.player.x, p.y - this.player.y, p.z - this.player.z);
             
-            if (proj.scale > 0) {
+            if (proj && proj.x > -100 && proj.x < canvas.width+100 && proj.y > -100 && proj.y < canvas.height+100) {
                 ctx.fillStyle = '#00ff00';
                 ctx.beginPath();
-                ctx.arc(proj.x, proj.y, p.radius * proj.scale * 0.5, 0, Math.PI * 2);
+                ctx.arc(proj.x, proj.y, Math.max(4, p.radius * proj.scale * 0.5), 0, Math.PI * 2);
                 ctx.fill();
                 
                 ctx.fillStyle = '#0f0';
                 ctx.font = '12px monospace';
                 ctx.textAlign = 'center';
-                ctx.fillText(p.name, proj.x, proj.y - p.radius * proj.scale * 0.7);
+                ctx.fillText(p.name, proj.x, proj.y - Math.max(4, p.radius * proj.scale * 0.7));
             }
         }
 
@@ -408,15 +421,24 @@ class EliteGame {
         for (let e of this.enemies) {
             let proj = project(e.x - this.player.x, e.y - this.player.y, e.z - this.player.z);
             
-            if (proj.scale > 0 && proj.x > 0 && proj.x < canvas.width && proj.y > 0 && proj.y < canvas.height) {
+            if (proj && proj.x > 0 && proj.x < canvas.width && proj.y > 0 && proj.y < canvas.height) {
+                // Draw a distinctive ship shape — minimum 12px so it's always visible
+                const sz = Math.max(12, 10 * proj.scale);
                 ctx.strokeStyle = '#ff0000';
                 ctx.lineWidth = 2;
+                // Triangle/arrow shape pointing up
                 ctx.beginPath();
-                ctx.moveTo(proj.x - 8*proj.scale, proj.y);
-                ctx.lineTo(proj.x + 8*proj.scale, proj.y);
-                ctx.moveTo(proj.x, proj.y - 8*proj.scale);
-                ctx.lineTo(proj.x, proj.y + 8*proj.scale);
+                ctx.moveTo(proj.x, proj.y - sz);          // nose
+                ctx.lineTo(proj.x + sz * 0.7, proj.y + sz * 0.6); // right wing
+                ctx.lineTo(proj.x, proj.y + sz * 0.2);    // tail notch
+                ctx.lineTo(proj.x - sz * 0.7, proj.y + sz * 0.6); // left wing
+                ctx.closePath();
                 ctx.stroke();
+                // Red dot at center
+                ctx.fillStyle = '#ff4444';
+                ctx.beginPath();
+                ctx.arc(proj.x, proj.y, 3, 0, Math.PI * 2);
+                ctx.fill();
             }
         }
 
@@ -424,7 +446,7 @@ class EliteGame {
         for (let b of this.bullets) {
             let proj = project(b.x - this.player.x, b.y - this.player.y, b.z - this.player.z);
             
-            if (proj.scale > 0 && proj.x > 0 && proj.x < canvas.width && proj.y > 0 && proj.y < canvas.height) {
+            if (proj && proj.x > 0 && proj.x < canvas.width && proj.y > 0 && proj.y < canvas.height) {
                 ctx.fillStyle = b.owner === 'player' ? '#ffff00' : '#ff8800';
                 ctx.beginPath();
                 ctx.arc(proj.x, proj.y, 2, 0, Math.PI * 2);
@@ -436,13 +458,28 @@ class EliteGame {
         for (let ex of this.explosions) {
             let proj = project(ex.x - this.player.x, ex.y - this.player.y, ex.z - this.player.z);
             
-            if (proj.scale > 0) {
+            if (proj) {
                 ctx.fillStyle = `rgba(255, ${Math.random() * 128}, 0, ${ex.life/30})`;
                 ctx.beginPath();
                 ctx.arc(proj.x, proj.y, 20 * (1 - ex.life/30), 0, Math.PI * 2);
                 ctx.fill();
             }
         }
+        // Debug overlay — shows key state and player position
+        ctx.fillStyle = '#0f0';
+        ctx.font = '11px monospace';
+        ctx.textAlign = 'left';
+        const keys = [];
+        if (this.input.up) keys.push('↑');
+        if (this.input.down) keys.push('↓');
+        if (this.input.left) keys.push('←');
+        if (this.input.right) keys.push('→');
+        if (this.input.forward) keys.push('W');
+        if (this.input.backward) keys.push('S');
+        if (this.input.fire) keys.push('FIRE');
+        ctx.fillText(`Keys: ${keys.join(' ') || 'none'}`, 8, 16);
+        ctx.fillText(`Yaw:${this.player.yaw.toFixed(2)} Pitch:${this.player.pitch.toFixed(2)} Spd:${this.player.speed.toFixed(1)}`, 8, 30);
+        ctx.fillText(`Pos: ${Math.floor(this.player.x)},${Math.floor(this.player.y)},${Math.floor(this.player.z)}`, 8, 44);
     }
 
     updateHUD() {
