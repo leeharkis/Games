@@ -89,8 +89,8 @@ let nextFork   = 1800; // distance at which next fork starts
 // right lane: islandRight .. ROAD_RIGHT
 // island centre scrolls down; left/right edges animate outward then inward
 
-const FORK_TRANSITION = 200;   // world units for split/merge animation
-const FORK_HOLD       = 800;   // world units for fully-split section
+const FORK_TRANSITION = 800;   // world units for split/merge animation (slow feed-in)
+const FORK_HOLD       = 1200;  // world units for fully-split section
 const ISLAND_W_MAX    = 80;    // max island width when fully split
 const ISLAND_W_MIN    = 0;
 
@@ -165,6 +165,7 @@ let oilSlicks = [], smokeClouds = [];
 let truck = null, truckTimer = 0;
 const TRUCK_INTERVAL = 1200;
 let trees = [];
+let autoFire = true;   // toggles with F key
 
 // ─── Input ────────────────────────────────────────────────────────────────────
 const keys = {};
@@ -174,6 +175,7 @@ document.addEventListener('keydown', e => {
     if (state === 'gameover' && (e.code === 'Space' || e.code === 'Enter')) startGame();
     if (state === 'playing') {
         if (e.code === 'Space') fireBullet();
+        if (e.code === 'KeyF') autoFire = !autoFire;
         if (e.code === 'KeyZ') useWeapon('OIL');
         if (e.code === 'KeyX') useWeapon('SMOKE');
     }
@@ -424,7 +426,7 @@ function updatePlayer() {
         player.x = clamp(player.x, g.left + hw + 8, g.right - hw - 8);
     }
 
-    if (keys['Space']) fireBullet();
+    if (autoFire || keys['Space']) fireBullet();
 }
 
 // ─── Enemies ──────────────────────────────────────────────────────────────────
@@ -763,12 +765,13 @@ function drawTitle() {
     ctx.font = '14px Courier New'; ctx.fillStyle = '#aaa';
     ctx.fillText('UP / DOWN      — accelerate / brake', W/2, H/2+30);
     ctx.fillText('LEFT / RIGHT   — steer', W/2, H/2+52);
-    ctx.fillText('SPACE          — fire', W/2, H/2+74);
-    ctx.fillText('Z              — drop oil slick', W/2, H/2+96);
-    ctx.fillText('X              — smoke screen', W/2, H/2+118);
+    ctx.fillText('SPACE          — fire (manual)', W/2, H/2+74);
+    ctx.fillText('F              — toggle autofire', W/2, H/2+96);
+    ctx.fillText('Z              — drop oil slick', W/2, H/2+118);
+    ctx.fillText('X              — smoke screen', W/2, H/2+140);
     ctx.font = 'bold 16px Courier New';
     ctx.fillStyle = Math.floor(frameCount/20)%2 ? '#fff' : '#888';
-    ctx.fillText('PRESS SPACE TO START', W/2, H/2+160);
+    ctx.fillText('PRESS SPACE TO START', W/2, H/2+180);
 }
 
 function drawDeadScreen() {
@@ -852,7 +855,12 @@ function loop() {
     ctx.textAlign = 'left';
     ctx.font = '10px Courier New';
     ctx.fillStyle = '#555';
-    ctx.fillText('Z=OIL  X=SMOKE', ROAD_LEFT+4, H-6);
+    ctx.fillText('Z=OIL  X=SMOKE  F=AUTOFIRE', ROAD_LEFT+4, H-6);
+    // Autofire indicator
+    ctx.fillStyle = autoFire ? '#44ffaa' : '#555';
+    ctx.font = 'bold 10px Courier New';
+    ctx.textAlign = 'right';
+    ctx.fillText('AUTO ' + (autoFire ? 'ON' : 'OFF'), ROAD_RIGHT - 4, H - 6);
 }
 
 spawnTrees();
