@@ -201,15 +201,15 @@ function pacReset() {
 // ─── Ghosts ──────────────────────────────────────────────────────────────────
 const GCOLORS = ['#ff0000','#ffb8ff','#00ffff','#ffb852'];
 const SCATTER = [{row:0,col:18},{row:0,col:2},{row:22,col:20},{row:22,col:0}];
-// Ghost house centre tile
+// Ghost house centre tile — row 7 col 10 is open corridor just above house
 const HEXIT = {row:7, col:10};
 
 let ghosts = [];
 
 function ghostReset() {
-    // Blinky starts outside, others in house
+    // Blinky starts above ghost house, others inside
     ghosts = [
-        mkGhost(0, 8, 10, 'chase',  0),
+        mkGhost(0, 7, 10, 'chase',  0),   // Blinky: row 7 col 10 — open corridor above house
         mkGhost(1, 9, 9,  'house',  80),
         mkGhost(2, 9, 10, 'house', 160),
         mkGhost(3, 9, 11, 'house', 240),
@@ -245,47 +245,50 @@ function nextLevel() {
 }
 
 // ─── Movement helpers ─────────────────────────────────────────────────────────
-// Are we close enough to a tile centre to turn?
-const SNAP = PAC_SPEED + 0.5;
+const SNAP = 1.0;  // snap threshold — must be < PAC_SPEED
 
 function nearCentre(x, y, col, row) {
-    return Math.abs(x - tx(col)) < SNAP && Math.abs(y - ty(row)) < SNAP;
+    return Math.abs(x - tx(col)) <= SNAP && Math.abs(y - ty(row)) <= SNAP;
 }
 
-function wrapCol(c) { return ((c%COLS)+COLS)%COLS; }
+function wrapCol(c) { return ((c % COLS) + COLS) % COLS; }
 
 // ─── Update Pac-Man ──────────────────────────────────────────────────────────
 function updatePac() {
     if (levelTimer > 0) return;
 
-    // Mouth
+    // Mouth animation
     pac.mouthA += 0.05 * pac.mouthDir;
     if (pac.mouthA >= 0.22) pac.mouthDir = -1;
     if (pac.mouthA <= 0.01) pac.mouthDir =  1;
 
-    // Accept queued input from keys (continuous)
+    // Accept continuous key input
     if (keys['ArrowLeft'])  { wantDx=-1; wantDy=0; }
     if (keys['ArrowRight']) { wantDx= 1; wantDy=0; }
     if (keys['ArrowUp'])    { wantDx= 0; wantDy=-1; }
     if (keys['ArrowDown'])  { wantDx= 0; wantDy= 1; }
 
-    // At (or near) tile centre — try to turn / continue
+    // At tile centre — decide direction for next tile
     if (nearCentre(pac.x, pac.y, pac.col, pac.row)) {
-        // Snap exactly to centre
         pac.x = tx(pac.col);
         pac.y = ty(pac.row);
 
-        // Try wanted direction
+        // Try to turn to wanted direction
         const wc = wrapCol(pac.col + wantDx);
         const wr = pac.row + wantDy;
-        if (!isWall(wr, wc)) {
-            pac.dx = wantDx; pac.dy = wantDy;
+        if (wantDx !== 0 || wantDy !== 0) {
+            if (!isWall(wr, wc)) {
+                pac.dx = wantDx;
+                pac.dy = wantDy;
+            }
         }
-        // If current direction hits wall, stop
+
+        // Check if current direction is still open
         const nc = wrapCol(pac.col + pac.dx);
         const nr = pac.row + pac.dy;
         if (isWall(nr, nc)) {
-            pac.dx = 0; pac.dy = 0;
+            pac.dx = 0;
+            pac.dy = 0;
         }
     }
 
@@ -294,12 +297,12 @@ function updatePac() {
     pac.y += pac.dy * PAC_SPEED;
 
     // Tunnel wrap
-    if (pac.x < 0)       pac.x += COLS * TS;
-    if (pac.x >= COLS*TS) pac.x -= COLS * TS;
+    if (pac.x < 0)         pac.x += COLS * TS;
+    if (pac.x >= COLS * TS) pac.x -= COLS * TS;
 
-    // Update tile
-    pac.col = wrapCol(Math.round((pac.x - TS/2) / TS));
-    pac.row = Math.max(0, Math.min(ROWS-1, Math.round((pac.y - TS/2) / TS)));
+    // Update tile coords from pixel pos
+    pac.col = wrapCol(Math.round((pac.x - TS / 2) / TS));
+    pac.row = Math.max(0, Math.min(ROWS - 1, Math.round((pac.y - TS / 2) / TS)));
 
     // Eat
     const v = maze[pac.row]?.[pac.col];
@@ -309,7 +312,7 @@ function updatePac() {
     } else if (v === 2) {
         maze[pac.row][pac.col] = 3;
         score += 50; pelletsEaten++;
-        powerTimer = Math.max(180, 300 - level*20);
+        powerTimer = Math.max(180, 300 - level * 20);
         ghostEatCombo = 0; updateUI();
     }
 
@@ -319,90 +322,94 @@ function updatePac() {
 }
 
 // ─── Update ghost ─────────────────────────────────────────────────────────────
-const GSPEED = 1.1;
+const GSPEED = 1.0;
 
 function updateGhost(g) {
     const speed = g.mode==='frightened' ? GSPEED*0.55
-                : g.mode==='returning'  ? GSPEED*2.2
+                : g.mode==='returning'  ? GSPEED*2.0
                 : GSPEED;
 
     // House bounce
     if (g.mode === 'house') {
         g.exitTimer++;
         if (g.exitTimer >= g.exitDelay) {
-            // Exit: move to exit tile
             g.row = HEXIT.row; g.col = HEXIT.col;
             g.x = tx(g.col); g.y = ty(g.row);
             g.dx = 0; g.dy = -1;
             g.mode = 'scatter';
+            g.scatterTimer = 0;
         } else {
-            g.y += g.houseDir * 0.6;
-            if (g.y < ty(9)  - 4) g.houseDir =  1;
-            if (g.y > ty(10) + 4) g.houseDir = -1;
+            g.y += g.houseDir * 0.5;
+            if (g.y < ty(9)  - 5) g.houseDir =  1;
+            if (g.y > ty(10) + 5) g.houseDir = -1;
         }
         return;
     }
 
-    // Frightened mode toggling
+    // Frightened mode toggle
     if (powerTimer > 0 && g.mode !== 'frightened' && g.mode !== 'returning') {
         g.mode = 'frightened';
-        g.dx = -g.dx; g.dy = -g.dy; // reverse
+        g.dx = -g.dx; g.dy = -g.dy;
     }
     if (powerTimer <= 0 && g.mode === 'frightened') {
         g.mode = 'scatter';
+        g.scatterTimer = 0;
     }
 
     // Scatter → chase
     if (g.mode === 'scatter') {
-        g.scatterTimer = (g.scatterTimer||0) + 1;
-        if (g.scatterTimer > 280 + g.idx*20) { g.mode='chase'; g.scatterTimer=0; }
+        g.scatterTimer = (g.scatterTimer || 0) + 1;
+        if (g.scatterTimer > 300 + g.idx * 20) { g.mode = 'chase'; g.scatterTimer = 0; }
     }
 
-    // Returning to house
+    // Returning to house: arrive at exit tile → revive
     if (g.mode === 'returning') {
-        if (g.row === HEXIT.row && g.col === HEXIT.col) {
+        if (g.row === HEXIT.row && g.col === HEXIT.col &&
+            nearCentre(g.x, g.y, g.col, g.row)) {
             g.eaten = false; g.mode = 'scatter'; g.scatterTimer = 0;
         }
     }
 
-    // At tile centre → pick direction
+    // At tile centre → pick next direction
     if (nearCentre(g.x, g.y, g.col, g.row)) {
-        g.x = tx(g.col); g.y = ty(g.row);
+        g.x = tx(g.col);
+        g.y = ty(g.row);
 
         const target = getGhostTarget(g);
-        const dirs = [{dx:0,dy:-1},{dx:0,dy:1},{dx:-1,dy:0},{dx:1,dy:0}];
-        let best = null, bestDist = Infinity;
+        const dirs = [{dx:0,dy:-1},{dx:1,dy:0},{dx:0,dy:1},{dx:-1,dy:0}];
+        let best = null, bestScore = Infinity;
 
         for (const d of dirs) {
-            if (d.dx===-g.dx && d.dy===-g.dy) continue; // no 180
+            if (d.dx === -g.dx && d.dy === -g.dy) continue; // no reverse
             const nr = g.row + d.dy;
             const nc = wrapCol(g.col + d.dx);
-            const blocked = g.mode==='returning' ? isGhostWall(nr,nc) : isWall(nr,nc);
+            // Use ghost-specific wall check (they can pass through door when returning)
+            const blocked = g.mode === 'returning' ? isGhostWall(nr, nc) : isWall(nr, nc);
             if (blocked) continue;
-            // Ghosts can't go up into ghost house (tile 5 = door) except returning
-            if (g.mode!=='returning' && maze[nr]?.[nc]===5) continue;
+            if (g.mode !== 'returning' && maze[nr]?.[nc] === 5) continue; // can't enter via door
 
-            let dist;
-            if (g.mode==='frightened') {
-                dist = Math.random();
+            let s;
+            if (g.mode === 'frightened') {
+                s = Math.random();
             } else {
-                const dr=target.row-nr, dc=target.col-nc;
-                dist = dr*dr + dc*dc;
+                const dr = target.row - nr, dc = target.col - nc;
+                s = dr * dr + dc * dc;
             }
-            if (dist < bestDist) { bestDist=dist; best=d; }
+            if (s < bestScore) { bestScore = s; best = d; }
         }
-        if (best) { g.dx=best.dx; g.dy=best.dy; }
+        if (best) { g.dx = best.dx; g.dy = best.dy; }
+        // If no valid direction found (shouldn't happen in open maze), allow reverse
+        if (!best) { g.dx = -g.dx; g.dy = -g.dy; }
     }
 
     g.x += g.dx * speed;
     g.y += g.dy * speed;
 
-    // Wrap
-    if (g.x < 0)        g.x += COLS*TS;
-    if (g.x >= COLS*TS) g.x -= COLS*TS;
+    if (g.x < 0)         g.x += COLS * TS;
+    if (g.x >= COLS * TS) g.x -= COLS * TS;
 
-    g.col = wrapCol(Math.round((g.x - TS/2) / TS));
-    g.row = Math.max(0, Math.min(ROWS-1, Math.round((g.y - TS/2) / TS)));
+    g.col = wrapCol(Math.round((g.x - TS / 2) / TS));
+    g.row = Math.max(0, Math.min(ROWS - 1, Math.round((g.y - TS / 2) / TS)));
 }
 
 function getGhostTarget(g) {
