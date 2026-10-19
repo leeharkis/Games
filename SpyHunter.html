@@ -73,7 +73,9 @@ const LANE_W     = ROAD_W / 3;               // ~107 each lane
 
 // ─── Road scroll ─────────────────────────────────────────────────────────────
 let roadY = 0;
-const ROAD_SPEED_BASE = 4;
+const ROAD_SPEED_MIN  = 2;
+const ROAD_SPEED_MAX  = 12;
+const ROAD_SPEED_BASE = 5;   // starting speed
 let roadSpeed = ROAD_SPEED_BASE;
 
 // ─── Player ──────────────────────────────────────────────────────────────────
@@ -144,6 +146,7 @@ function startGame() {
     frameCount  = 0;
     diffTimer   = 0;
     roadSpeed   = ROAD_SPEED_BASE;
+    player.vy   = 0;
     bullets     = [];
     eBullets    = [];
     enemies     = [];
@@ -306,8 +309,9 @@ function updateEnemies() {
 
     for (let i = enemies.length - 1; i >= 0; i--) {
         const e = enemies[i];
-        // Move toward player (relative speed)
-        e.y += e.vy + (roadSpeed - ROAD_SPEED_BASE);
+        // Move relative to player speed — positive vy means enemy moves toward player
+        // At roadSpeed they scroll with the road; faster = approaching, slower = falling back
+        e.y += e.vy + roadSpeed;
 
         if (e.zigzag) {
             e.zigTimer++;
@@ -319,7 +323,7 @@ function updateEnemies() {
         if (e.shoots) {
             e.shootTimer--;
             if (e.shootTimer <= 0) {
-                eBullets.push({ x: e.x, y: e.y + e.h / 2, vy: 5 });
+                eBullets.push({ x: e.x, y: e.y + e.h / 2, vy: roadSpeed + 3 });
                 e.shootTimer = randi(80, 160);
             }
         }
@@ -511,40 +515,46 @@ function useWeapon(type) {
 }
 
 function updateOilAndSmoke() {
-    // Oil slicks scroll with road
+    // Oil slicks are fixed on the road — scroll downward at road speed
+    // Enemies coming from the top approach them; if an enemy reaches an oil slick it spins out
     for (let i = oilSlicks.length - 1; i >= 0; i--) {
         const o = oilSlicks[i];
-        o.y += roadSpeed;
+        o.y += roadSpeed;   // road-fixed position scrolls toward bottom
         o.life--;
-        if (o.life <= 0 || o.y > H + 20) { oilSlicks.splice(i, 1); continue; }
-        // Enemy hits oil
+        if (o.life <= 0 || o.y > H + 30) { oilSlicks.splice(i, 1); continue; }
+
+        // Enemy drives over oil slick
+        let hit = false;
         for (let j = enemies.length - 1; j >= 0; j--) {
             const e = enemies[j];
-            if (rectOverlap(o.x - 18, o.y - 12, 36, 24, e.x - e.w/2, e.y - e.h/2, e.w, e.h)) {
+            if (rectOverlap(o.x - 20, o.y - 14, 40, 28, e.x - e.w/2, e.y - e.h/2, e.w, e.h)) {
                 score += e.score;
-                spawnExplosion(e.x, e.y, '#ffaa00', 8);
+                spawnExplosion(e.x, e.y, '#ffaa00', 10);
                 enemies.splice(j, 1);
                 oilSlicks.splice(i, 1);
                 updateUI();
+                hit = true;
                 break;
             }
         }
+        if (hit) continue;
     }
 
-    // Smoke
+    // Smoke clouds are also road-fixed, expanding as they scroll
+    // Any enemy that enters the cloud crashes
     for (let i = smokeClouds.length - 1; i >= 0; i--) {
         const s = smokeClouds[i];
-        s.y += roadSpeed * 0.5;
-        s.r  += 0.3;
+        s.y += roadSpeed;
+        s.r  = Math.min(s.r + 0.5, 50);
         s.life--;
-        if (s.life <= 0 || s.y > H + 60) { smokeClouds.splice(i, 1); continue; }
-        // Blind / destroy enforcers that enter smoke
+        if (s.life <= 0 || s.y > H + 80) { smokeClouds.splice(i, 1); continue; }
+
         for (let j = enemies.length - 1; j >= 0; j--) {
             const e = enemies[j];
             const dx = e.x - s.x, dy = e.y - s.y;
-            if (Math.sqrt(dx*dx + dy*dy) < s.r + e.w/2 && e.shoots) {
+            if (Math.sqrt(dx*dx + dy*dy) < s.r + e.w/2) {
                 score += e.score;
-                spawnExplosion(e.x, e.y, '#aaaaaa', 6);
+                spawnExplosion(e.x, e.y, '#aaaaaa', 8);
                 enemies.splice(j, 1);
                 updateUI();
             }
@@ -609,12 +619,36 @@ function drawExplosions() {
     ctx.globalAlpha = 1;
 }
 
+// ─── Speedometer bar ─────────────────────────────────────────────────────────
+function drawSpeedBar() {
+    const barX = ROAD_RIGHT + 6, barY = 60, barW = 10, barH = H - 120;
+    ctx.fillStyle = '#222';
+    ctx.fillRect(barX, barY, barW, barH);
+    const pct = (roadSpeed - ROAD_SPEED_MIN) / (ROAD_SPEED_MAX - ROAD_SPEED_MIN);
+    const fillH = barH * pct;
+    const r = Math.floor(255 * pct), g = Math.floor(255 * (1 - pct));
+    ctx.fillStyle = `rgb(${r},${g},0)`;
+    ctx.fillRect(barX, barY + barH - fillH, barW, fillH);
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(barX, barY, barW, barH);
+    ctx.fillStyle = '#888';
+    ctx.font = '9px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText('SPD', barX + barW/2, barY - 4);
+}
+
 // ─── Player movement ──────────────────────────────────────────────────────────
 function updatePlayer() {
     if (player.invincible > 0) player.invincible--;
 
-    const accel = 0.5, friction = 0.85, maxVX = 4;
+    // Speed (Up/Down)
+    const speedAccel = 0.15;
+    if (keys['ArrowUp']   || keys['KeyW']) roadSpeed = clamp(roadSpeed + speedAccel, ROAD_SPEED_MIN, ROAD_SPEED_MAX);
+    if (keys['ArrowDown'] || keys['KeyS']) roadSpeed = clamp(roadSpeed - speedAccel, ROAD_SPEED_MIN, ROAD_SPEED_MAX);
 
+    // Steering (Left/Right)
+    const accel = 0.5, friction = 0.85, maxVX = 4;
     if (keys['ArrowLeft']  || keys['KeyA']) player.vx -= accel;
     if (keys['ArrowRight'] || keys['KeyD']) player.vx += accel;
     player.vx *= friction;
@@ -669,14 +703,15 @@ function drawTitle() {
 
     ctx.font = '14px Courier New';
     ctx.fillStyle = '#aaa';
-    ctx.fillText('ARROWS / WASD  — steer', W/2, H/2 + 30);
-    ctx.fillText('SPACE          — fire', W/2, H/2 + 52);
-    ctx.fillText('Z              — oil slick', W/2, H/2 + 74);
-    ctx.fillText('X              — smoke screen', W/2, H/2 + 96);
+    ctx.fillText('UP / DOWN      — accelerate / brake', W/2, H/2 + 30);
+    ctx.fillText('LEFT / RIGHT   — steer', W/2, H/2 + 52);
+    ctx.fillText('SPACE          — fire', W/2, H/2 + 74);
+    ctx.fillText('Z              — drop oil slick', W/2, H/2 + 96);
+    ctx.fillText('X              — smoke screen', W/2, H/2 + 118);
 
     ctx.font = 'bold 16px Courier New';
     ctx.fillStyle = Math.floor(frameCount / 20) % 2 ? '#fff' : '#888';
-    ctx.fillText('PRESS SPACE TO START', W/2, H/2 + 140);
+    ctx.fillText('PRESS SPACE TO START', W/2, H/2 + 160);
 }
 
 function drawDeadScreen() {
@@ -765,9 +800,7 @@ function loop() {
 
     // ── Playing ──
     diffTimer++;
-    roadSpeed = ROAD_SPEED_BASE + Math.floor(diffTimer / 400) * 0.5;
-    roadSpeed = Math.min(roadSpeed, 10);
-
+    // Difficulty only affects enemy spawn rate now; player controls their own speed
     roadY = (roadY + roadSpeed) % (H * 2);
 
     // Update
@@ -789,8 +822,9 @@ function loop() {
     drawPlayer();
     drawBullets();
     drawExplosions();
+    drawSpeedBar();
 
-    // Weapon cycle hint
+    // Weapon hint
     ctx.textAlign = 'left';
     ctx.font = '10px Courier New';
     ctx.fillStyle = '#555';
