@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Defender</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+    background:#000;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    min-height:100vh;
+    font-family:'Courier New',monospace;
+    user-select:none;
+    overflow:hidden;
+}
+canvas { display:block; }
+#ui {
+    width:640px;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    padding:6px 10px;
+    background:#000;
+    color:#fff;
+    font-size:13px;
+    font-family:'Courier New',monospace;
+}
+.label { color:#aaa; }
+#score-display { color:#ffdd00; font-weight:bold; }
+#hi-display    { color:#aaaaff; font-weight:bold; }
+#lives-display { color:#ff4444; font-weight:bold; }
+#bombs-display { color:#ff8800; font-weight:bold; }
+#wave-display  { color:#44ffaa; font-weight:bold; }
+</style>
+</head>
+<body>
+<div id="ui">
+    <span><span class="label">SCORE </span><span id="score-display">0</span></span>
+    <span><span class="label">HI </span><span id="hi-display">0</span></span>
+    <span><span class="label">WAVE </span><span id="wave-display">1</span></span>
+    <span><span class="label">BOMBS </span><span id="bombs-display">3</span></span>
+    <span><span class="label">LIVES </span><span id="lives-display">3</span></span>
+</div>
+<canvas id="c" width="640" height="480"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = 640, H = 480;
+
+const scoreEl = document.getElementById('score-display');
+const hiEl    = document.getElementById('hi-display');
+const livesEl = document.getElementById('lives-display');
+const bombsEl = document.getElementById('bombs-display');
+const waveEl  = document.getElementById('wave-display');
+
+// ── World ───────────────────────────────────────────────────────────────────
+const WORLD_W = 3200;   // total scrolling world width
+const GROUND_Y = H - 40;
+const RADAR_H = 32;
+const RADAR_Y = 4;
+const RADAR_W = W;
+
+// ── State ───────────────────────────────────────────────────────────────────
+let state = 'title';
+let score = 0, hiScore = 0, lives = 3, wave = 1;
+let smartBombs = 3;
+let frameCount = 0;
+let deathTimer = 0;
+let hyperTimer = 0;  // hyperspace cooldown
+
+// ── Camera ──────────────────────────────────────────────────────────────────
+let camX = 0;   // world x of left edge of screen
+
+// ── Player ship ─────────────────────────────────────────────────────────────
+let ship = {
+    x: 400, y: 200,
+    vx: 0, vy: 0,
+    facing: 1,   // 1=right, -1=left
+    thrusting: false,
+    invincible: 0,
+};
+
+// ── Collections ─────────────────────────────────────────────────────────────
+let bullets = [];
+let landers = [];
+let mutants = [];
+let bombs = [];       // enemy bombs
+let humanoids = [];
+let explosions = [];
+let particles = [];
+let starfield = [];
+
+// ── Input ───────────────────────────────────────────────────────────────────
+const keys = {};
+document.addEventListener('keydown', e => {
+    keys[e.code] = true;
+    if ((state === 'title' || state === 'gameover') &&
+        (e.code === 'Space' || e.code === 'Enter')) startGame();
+    if (state === 'playing') {
+        if (e.code === 'Space') fireGun();
+        if (e.code === 'KeyZ')  smartBomb();
+        if (e.code === 'KeyX')  hyperspace();
+    }
+    e.preventDefault();
+});
+document.addEventListener('keyup', e => { keys[e.code] = false; });
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+function rand(a,b) { return a+Math.random()*(b-a); }
+function randi(a,b){ return Math.floor(rand(a,b+1)); }
+function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+function worldToScreen(wx) {
+    let sx = wx - camX;
+    // wrap
+    if (sx < -50) sx += WORLD_W;
+    if (sx > W+50) sx -= WORLD_W;
+    return sx;
+}
+
+function spawnExplosion(wx, y, color, count, size) {
+    for (let i = 0; i < count; i++) {
+        const a = rand(0,Math.PI*2), sp = rand(1, size||5);
+        explosions.push({ wx, y, vx: Math.cos(a)*sp, vy: Math.sin(a)*sp,
+                          life: randi(20,50), color: color||'#ffaa00', r: rand(2,7) });
+    }
+}
+
+// ── Init ────────────────────────────────────────────────────────────────────
+function buildStarfield() {
+    starfield = [];
+    for (let i = 0; i < 200; i++) {
+        starfield.push({ wx: rand(0, WORLD_W), y: rand(0, GROUND_Y-10),
+                         brightness: rand(0.3,1), size: rand(0.5,2) });
+    }
+}
+
+function spawnHumanoids() {
+    humanoids = [];
+    const count = 10;
+    for (let i = 0; i < count; i++) {
+        humanoids.push({
+            wx: rand(50, WORLD_W-50),
+            y: GROUND_Y - 12,
+            vy: 0,
+            carried: false,
+            carrier: null,
+            alive: true,
+        });
+    }
+}
+
+function spawnWave() {
+    const lcount = 5 + wave * 2;
+    landers = [];
+    for (let i = 0; i < lcount; i++) {
+        landers.push({
+            wx: rand(0, WORLD_W),
+            y: rand(60, GROUND_Y - 80),
+            vx: rand(-1,1) * (0.8 + wave * 0.1),
+            vy: 0,
+            hp: 1,
+            state: 'roam',   // roam | descend | ascending | bomb
+            target: null,
+            bombTimer: randi(120, 300),
+        });
+    }
+    mutants = [];
+}
+
+function startGame() {
+    state = 'playing';
+    score = 0; lives = 3; wave = 1; smartBombs = 3;
+    frameCount = 0;
+    ship.x = 400; ship.y = 200; ship.vx = 0; ship.vy = 0;
+    ship.facing = 1; ship.invincible = 120;
+    camX = ship.x - W/2;
+    bullets = []; landers = []; mutants = []; bombs = [];
+    explosions = []; particles = [];
+    buildStarfield();
+    spawnHumanoids();
+    spawnWave();
+    updateUI();
+}
+
+function nextWave() {
+    wave++;
+    smartBombs = Math.min(smartBombs + 1, 5);
+    bullets = []; landers = []; mutants = []; bombs = [];
+    explosions = [];
+    spawnHumanoids();
+    spawnWave();
+    updateUI();
+}
+
+// ── Weapons ─────────────────────────────────────────────────────────────────
+let gunCooldown = 0;
+function fireGun() {
+    if (gunCooldown > 0) return;
+    bullets.push({ wx: ship.x + ship.facing*20, y: ship.y, vx: ship.facing*12, vy:0 });
+    gunCooldown = 6;
+}
+
+function smartBomb() {
+    if (smartBombs <= 0) return;
+    smartBombs--;
+    // Destroy all enemies on screen
+    for (const l of landers) spawnExplosion(l.wx, l.y, '#ff8800', 12);
+    for (const m of mutants) spawnExplosion(m.wx, m.y, '#ff00ff', 12);
+    score += landers.length * 150 + mutants.length * 250;
+    landers = []; mutants = [];
+    updateUI();
+}
+
+function hyperspace() {
+    if (hyperTimer > 0) return;
+    ship.wx = rand(0, WORLD_W);
+    ship.x  = rand(50, W-50);
+    ship.y  = rand(80, GROUND_Y-60);
+    ship.vx = 0; ship.vy = 0;
+    hyperTimer = 90;
+    spawnExplosion(ship.x + camX, ship.y, '#44ffaa', 8, 3);
+}
+
+// ── Update ───────────────────────────────────────────────────────────────────
+function updateShip() {
+    if (ship.invincible > 0) ship.invincible--;
+    if (hyperTimer > 0) hyperTimer--;
+    if (gunCooldown > 0) gunCooldown--;
+
+    const accel = 0.4, maxV = 8, friction = 0.92;
+
+    if (keys['ArrowRight'] || keys['KeyD']) { ship.vx += accel; ship.facing = 1; ship.thrusting = true; }
+    else if (keys['ArrowLeft'] || keys['KeyA']) { ship.vx -= accel; ship.facing = -1; ship.thrusting = true; }
+    else { ship.thrusting = false; }
+
+    if (keys['ArrowUp']   || keys['KeyW']) ship.vy -= accel;
+    if (keys['ArrowDown'] || keys['KeyS']) ship.vy += accel;
+
+    ship.vx = clamp(ship.vx * friction, -maxV, maxV);
+    ship.vy = clamp(ship.vy * friction, -maxV, maxV);
+
+    ship.x += ship.vx;
+    ship.y  = clamp(ship.y + ship.vy, 30, GROUND_Y - 30);
+
+    // Wrap screen position → world position
+    if (ship.x < 0) { ship.x += W; camX -= W; }
+    if (ship.x > W) { ship.x -= W; camX += W; }
+    camX += ship.vx;
+    camX = ((camX % WORLD_W) + WORLD_W) % WORLD_W;
+
+    if (keys['Space']) fireGun();
+}
+
+function updateBullets() {
+    for (let i = bullets.length-1; i >= 0; i--) {
+        const b = bullets[i];
+        b.wx += b.vx;
+        b.wx = ((b.wx % WORLD_W) + WORLD_W) % WORLD_W;
+
+        // Hit lander
+        let hit = false;
+        for (let j = landers.length-1; j >= 0; j--) {
+            const l = landers[j];
+            const dx = b.wx - l.wx, dy = b.y - l.y;
+            if (Math.abs(dx) < 20 && Math.abs(dy) < 14) {
+                spawnExplosion(l.wx, l.y, '#ff8800', 10);
+                // Release carried humanoid
+                if (l.state === 'ascending' && l.target) {
+                    l.target.carried = false; l.target.carrier = null;
+                    l.target.vy = 4; // fall
+                }
+                score += 150;
+                landers.splice(j,1);
+                bullets.splice(i,1);
+                hit = true; updateUI(); break;
+            }
+        }
+        if (hit) continue;
+
+        // Hit mutant
+        for (let j = mutants.length-1; j >= 0; j--) {
+            const m = mutants[j];
+            const dx = b.wx - m.wx, dy = b.y - m.y;
+            if (Math.abs(dx) < 16 && Math.abs(dy) < 16) {
+                spawnExplosion(m.wx, m.y, '#ff00ff', 10);
+                score += 250;
+                mutants.splice(j,1);
+                bullets.splice(i,1);
+                hit = true; updateUI(); break;
+            }
+        }
+        if (hit) continue;
+
+        // Off screen (wraps world, remove after >W travel)
+        b._dist = (b._dist||0) + Math.abs(b.vx);
+        if (b._dist > W*1.5) bullets.splice(i,1);
+    }
+}
+
+function updateLanders() {
+    for (let i = landers.length-1; i >= 0; i--) {
+        const l = landers[i];
+        l.wx += l.vx;
+        l.wx = ((l.wx % WORLD_W) + WORLD_W) % WORLD_W;
+
+        if (l.state === 'roam') {
+            // Bounce off world edges (handled by wrap)
+            l.vy *= 0.95;
+            l.y += l.vy;
+            l.y = clamp(l.y, 40, GROUND_Y - 80);
+
+            // Randomly descend toward humanoid
+            if (Math.random() < 0.002 && humanoids.length > 0) {
+                const h = humanoids[randi(0, humanoids.length-1)];
+                if (h.alive && !h.carried) {
+                    l.state = 'descend';
+                    l.target = h;
+                    l.vx = (h.wx - l.wx > 0 ? 1 : -1) * Math.abs(l.vx);
+                }
+            }
+        } else if (l.state === 'descend') {
+            if (!l.target || !l.target.alive) { l.state = 'roam'; l.target = null; continue; }
+            const dy = l.target.y - l.y;
+            l.y += dy > 0 ? Math.min(1.2, dy) : Math.max(-1.2, dy);
+            const dxx = l.target.wx - l.wx;
+            l.wx += dxx > 0 ? Math.min(1, dxx) : Math.max(-1, dxx);
+            if (Math.abs(dy) < 4) {
+                l.state = 'ascending';
+                l.target.carried = true;
+                l.target.carrier = l;
+                l.vy = -1.5;
+            }
+        } else if (l.state === 'ascending') {
+            l.y += l.vy;
+            if (l.target) { l.target.wx = l.wx; l.target.y = l.y + 16; }
+            if (l.y < 20) {
+                // Humanoid converted to mutant
+                if (l.target) { l.target.alive = false; humanoids = humanoids.filter(h=>h!==l.target); }
+                mutants.push({ wx: l.wx, y: l.y, vx: rand(-2,2), vy: rand(-1,1) });
+                landers.splice(i,1);
+                score -= 50;
+            }
+        }
+
+        // Bomb
+        l.bombTimer--;
+        if (l.bombTimer <= 0) {
+            const sx = worldToScreen(l.wx);
+            if (sx > 0 && sx < W) {
+                bombs.push({ wx: l.wx, y: l.y, vy: 3 });
+            }
+            l.bombTimer = randi(180, 360);
+        }
+    }
+
+    // Mutants
+    for (let i = mutants.length-1; i >= 0; i--) {
+        const m = mutants[i];
+        m.wx += m.vx;
+        m.wx = ((m.wx%WORLD_W)+WORLD_W)%WORLD_W;
+        m.y  = clamp(m.y + m.vy, 40, GROUND_Y-30);
+        if (Math.random()<0.02) m.vx = rand(-3,3)*(1+wave*0.1);
+        if (Math.random()<0.02) m.vy = rand(-2,2);
+    }
+
+    // Falling humanoids (dropped)
+    for (const h of humanoids) {
+        if (h.carried) continue;
+        if (h.y < GROUND_Y - 12) {
+            h.vy += 0.15;
+            h.y  += h.vy;
+            if (h.y >= GROUND_Y-12) {
+                h.y = GROUND_Y-12;
+                if (h.vy > 6) { h.alive = false; } // splat
+                h.vy = 0;
+            }
+        }
+    }
+    humanoids = humanoids.filter(h=>h.alive);
+
+    // Enemy bombs
+    for (let i = bombs.length-1; i >= 0; i--) {
+        const b = bombs[i];
+        b.y += b.vy;
+        if (b.y > GROUND_Y) { bombs.splice(i,1); continue; }
+        if (ship.invincible <= 0) {
+            const sx = worldToScreen(b.wx);
+            const dx = ship.x - sx, dy = ship.y - b.y;
+            if (Math.abs(dx)<14 && Math.abs(dy)<14) {
+                bombs.splice(i,1);
+                hitShip();
+            }
+        }
+    }
+}
+
+function checkShipCollisions() {
+    if (ship.invincible > 0) return;
+    for (let i = landers.length-1; i >= 0; i--) {
+        const l = landers[i];
+        const sx = worldToScreen(l.wx);
+        const dx = ship.x - sx, dy = ship.y - l.y;
+        if (Math.abs(dx)<22 && Math.abs(dy)<16) {
+            spawnExplosion(l.wx, l.y, '#ff8800', 8);
+            landers.splice(i,1);
+            hitShip(); return;
+        }
+    }
+    for (let i = mutants.length-1; i >= 0; i--) {
+        const m = mutants[i];
+        const sx = worldToScreen(m.wx);
+        const dx = ship.x - sx, dy = ship.y - m.y;
+        if (Math.abs(dx)<18 && Math.abs(dy)<18) {
+            spawnExplosion(m.wx, m.y, '#ff00ff', 8);
+            mutants.splice(i,1);
+            hitShip(); return;
+        }
+    }
+}
+
+function hitShip() {
+    spawnExplosion(ship.x + camX, ship.y, '#ff4400', 16, 6);
+    lives--;
+    updateUI();
+    if (lives <= 0) {
+        state = 'gameover';
+        if (score > hiScore) hiScore = score;
+        updateUI();
+    } else {
+        state = 'dead';
+        deathTimer = 120;
+        ship.invincible = 180;
+        ship.vx = 0; ship.vy = 0;
+    }
+}
+
+function updateExplosions() {
+    for (let i = explosions.length-1; i >= 0; i--) {
+        const p = explosions[i];
+        p.wx += p.vx; p.y += p.vy; p.life--; p.r *= 0.96;
+        if (p.life <= 0) explosions.splice(i,1);
+    }
+}
+
+// ── Wave check ───────────────────────────────────────────────────────────────
+function checkWave() {
+    if (landers.length === 0 && mutants.length === 0) nextWave();
+}
+
+// ── Draw ─────────────────────────────────────────────────────────────────────
+function drawStars() {
+    for (const s of starfield) {
+        const sx = worldToScreen(s.wx);
+        if (sx < -2 || sx > W+2) continue;
+        ctx.fillStyle = `rgba(255,255,255,${s.brightness})`;
+        ctx.fillRect(sx, s.y, s.size, s.size);
+    }
+}
+
+function drawGround() {
+    // Ground strip
+    ctx.fillStyle = '#1a4a1a';
+    ctx.fillRect(0, GROUND_Y, W, H - GROUND_Y);
+    ctx.fillStyle = '#2d6a2d';
+    ctx.fillRect(0, GROUND_Y, W, 4);
+    // Mountains silhouette
+    ctx.fillStyle = '#1a3a1a';
+    ctx.beginPath();
+    ctx.moveTo(0, GROUND_Y);
+    for (let x = 0; x <= W; x += 20) {
+        const wx = camX + x;
+        const mh = 20 + 25 * Math.abs(Math.sin(wx * 0.003)) + 15 * Math.abs(Math.sin(wx * 0.007));
+        ctx.lineTo(x, GROUND_Y - mh);
+    }
+    ctx.lineTo(W, GROUND_Y);
+    ctx.closePath();
+    ctx.fill();
+}
+
+function drawHumanoids() {
+    for (const h of humanoids) {
+        const sx = worldToScreen(h.wx);
+        if (sx < -10 || sx > W+10) continue;
+        ctx.fillStyle = '#88ff88';
+        // Stick figure
+        ctx.beginPath(); ctx.arc(sx, h.y-10, 4, 0, Math.PI*2); ctx.fill();
+        ctx.strokeStyle = '#88ff88'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(sx, h.y-6); ctx.lineTo(sx, h.y+4); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(sx-5, h.y-2); ctx.lineTo(sx+5, h.y-2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(sx, h.y+4); ctx.lineTo(sx-4, h.y+10); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(sx, h.y+4); ctx.lineTo(sx+4, h.y+10); ctx.stroke();
+    }
+}
+
+function drawLanders() {
+    for (const l of landers) {
+        const sx = worldToScreen(l.wx);
+        if (sx < -30 || sx > W+30) continue;
+        ctx.fillStyle = '#ff8800';
+        // Lander shape
+        ctx.beginPath();
+        ctx.moveTo(sx, l.y-12);
+        ctx.lineTo(sx+14, l.y+8);
+        ctx.lineTo(sx+8, l.y+8);
+        ctx.lineTo(sx+8, l.y+14);
+        ctx.lineTo(sx-8, l.y+14);
+        ctx.lineTo(sx-8, l.y+8);
+        ctx.lineTo(sx-14, l.y+8);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#ffdd00';
+        ctx.beginPath(); ctx.arc(sx, l.y, 5, 0, Math.PI*2); ctx.fill();
+    }
+}
+
+function drawMutants() {
+    for (const m of mutants) {
+        const sx = worldToScreen(m.wx);
+        if (sx < -20 || sx > W+20) continue;
+        ctx.fillStyle = '#ff44ff';
+        ctx.beginPath();
+        ctx.moveTo(sx, m.y-14);
+        ctx.lineTo(sx+10, m.y+4);
+        ctx.lineTo(sx+5, m.y+14);
+        ctx.lineTo(sx-5, m.y+14);
+        ctx.lineTo(sx-10, m.y+4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#ff00ff';
+        ctx.beginPath(); ctx.arc(sx, m.y-2, 4, 0, Math.PI*2); ctx.fill();
+    }
+}
+
+function drawShip() {
+    if (ship.invincible > 0 && Math.floor(frameCount/4)%2===0) return;
+    const x = ship.x, y = ship.y, f = ship.facing;
+    // Body
+    ctx.fillStyle = '#aaddff';
+    ctx.beginPath();
+    ctx.moveTo(x + f*20, y);
+    ctx.lineTo(x - f*14, y - 8);
+    ctx.lineTo(x - f*10, y);
+    ctx.lineTo(x - f*14, y + 8);
+    ctx.closePath();
+    ctx.fill();
+    // Cockpit
+    ctx.fillStyle = '#44aaff';
+    ctx.beginPath();
+    ctx.arc(x + f*4, y, 5, 0, Math.PI*2);
+    ctx.fill();
+    // Thrust
+    if (ship.thrusting) {
+        ctx.fillStyle = '#ff8800';
+        ctx.beginPath();
+        ctx.moveTo(x - f*10, y-4);
+        ctx.lineTo(x - f*10 - f*randi(8,16), y);
+        ctx.lineTo(x - f*10, y+4);
+        ctx.closePath();
+        ctx.fill();
+    }
+}
+
+function drawBullets() {
+    ctx.fillStyle = '#ffff44';
+    for (const b of bullets) {
+        const sx = worldToScreen(b.wx);
+        ctx.fillRect(sx-6, b.y-2, 12, 4);
+    }
+}
+
+function drawEnemyBombs() {
+    ctx.fillStyle = '#ff4444';
+    for (const b of bombs) {
+        const sx = worldToScreen(b.wx);
+        ctx.beginPath(); ctx.arc(sx, b.y, 4, 0, Math.PI*2); ctx.fill();
+    }
+}
+
+function drawExplosions() {
+    for (const p of explosions) {
+        ctx.globalAlpha = p.life/50;
+        ctx.fillStyle = p.color;
+        const sx = worldToScreen(p.wx);
+        ctx.beginPath(); ctx.arc(sx, p.y, p.r, 0, Math.PI*2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+}
+
+function drawRadar() {
+    // Mini-map at top
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, RADAR_W, RADAR_H + 8);
+    ctx.strokeStyle = '#444';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0, RADAR_Y, RADAR_W, RADAR_H);
+    const scaleX = RADAR_W / WORLD_W;
+    // Ground line
+    ctx.fillStyle = '#2d6a2d';
+    ctx.fillRect(0, RADAR_Y + RADAR_H - 4, RADAR_W, 4);
+    // Humanoids
+    ctx.fillStyle = '#88ff88';
+    for (const h of humanoids) ctx.fillRect(h.wx*scaleX-1, RADAR_Y+RADAR_H-6, 2, 4);
+    // Landers
+    ctx.fillStyle = '#ff8800';
+    for (const l of landers) ctx.fillRect(l.wx*scaleX-2, RADAR_Y+(l.y/H)*RADAR_H-2, 4, 4);
+    // Mutants
+    ctx.fillStyle = '#ff44ff';
+    for (const m of mutants) ctx.fillRect(m.wx*scaleX-2, RADAR_Y+(m.y/H)*RADAR_H-2, 4, 4);
+    // Ship
+    ctx.fillStyle = '#fff';
+    const shipRadarX = ((ship.x + camX) % WORLD_W) * scaleX;
+    ctx.fillRect(shipRadarX-3, RADAR_Y+((ship.y/H)*RADAR_H)-3, 6, 6);
+    // Viewport indicator
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.strokeRect(camX*scaleX, RADAR_Y, W*scaleX, RADAR_H);
+}
+
+function drawHUD() {
+    // Smart bomb icons
+    ctx.fillStyle = '#ff8800';
+    for (let i = 0; i < smartBombs; i++) {
+        ctx.beginPath(); ctx.arc(W-20-i*18, H-14, 7, 0, Math.PI*2); ctx.fill();
+    }
+}
+
+function drawTitle() {
+    ctx.fillStyle = 'rgba(0,0,0,0.8)'; ctx.fillRect(0,0,W,H);
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 52px Courier New'; ctx.fillStyle = '#ffdd00'; ctx.fillText('DEFENDER', W/2, H/2-70);
+    ctx.font = '14px Courier New'; ctx.fillStyle = '#aaa';
+    ctx.fillText('ARROWS / WASD — fly', W/2, H/2-10);
+    ctx.fillText('SPACE         — fire', W/2, H/2+12);
+    ctx.fillText('Z             — smart bomb (destroys all on screen)', W/2, H/2+34);
+    ctx.fillText('X             — hyperspace', W/2, H/2+56);
+    ctx.fillText('Protect the humanoids from landers!', W/2, H/2+82);
+    ctx.font = 'bold 16px Courier New';
+    ctx.fillStyle = Math.floor(frameCount/20)%2 ? '#fff':'#555';
+    ctx.fillText('PRESS SPACE TO START', W/2, H/2+124);
+}
+
+function drawGameOver() {
+    ctx.fillStyle = 'rgba(0,0,0,0.75)'; ctx.fillRect(0,0,W,H);
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 36px Courier New'; ctx.fillStyle = '#ff4444'; ctx.fillText('GAME OVER', W/2, H/2-30);
+    ctx.font = '18px Courier New'; ctx.fillStyle = '#ffdd00'; ctx.fillText('SCORE: '+score, W/2, H/2+10);
+    if (score >= hiScore && score > 0) { ctx.fillStyle='#44ffaa'; ctx.fillText('NEW HIGH SCORE!', W/2, H/2+36); }
+    ctx.font = 'bold 14px Courier New';
+    ctx.fillStyle = Math.floor(frameCount/20)%2 ? '#fff':'#555';
+    ctx.fillText('PRESS SPACE TO PLAY AGAIN', W/2, H/2+76);
+}
+
+function updateUI() {
+    scoreEl.textContent = score; hiEl.textContent = hiScore;
+    livesEl.textContent = lives; bombsEl.textContent = smartBombs;
+    waveEl.textContent  = wave;
+}
+
+// ── Main loop ────────────────────────────────────────────────────────────────
+function loop() {
+    requestAnimationFrame(loop);
+    frameCount++;
+    ctx.fillStyle = '#000305';
+    ctx.fillRect(0,0,W,H);
+
+    if (state === 'title') {
+        drawStars(); drawTitle(); return;
+    }
+
+    drawStars();
+    drawGround();
+    drawHumanoids();
+    drawLanders();
+    drawMutants();
+    drawBullets();
+    drawEnemyBombs();
+    drawExplosions();
+    drawShip();
+    drawRadar();
+    drawHUD();
+
+    if (state === 'playing') {
+        updateShip();
+        updateBullets();
+        updateLanders();
+        updateExplosions();
+        checkShipCollisions();
+        checkWave();
+    }
+
+    if (state === 'dead') {
+        deathTimer--;
+        if (deathTimer <= 0) { state='playing'; ship.x=400; ship.y=200; ship.vx=0; ship.vy=0; }
+    }
+
+    if (state === 'gameover') drawGameOver();
+}
+
+updateUI();
+loop();
+</script>
+</body>
+</html>
