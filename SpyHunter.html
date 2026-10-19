@@ -45,80 +45,132 @@ canvas { display:block; }
 </div>
 <canvas id="c" width="480" height="600"></canvas>
 <script>
-// ─── Canvas / ctx ────────────────────────────────────────────────────────────
 const canvas = document.getElementById('c');
 const ctx    = canvas.getContext('2d');
 const W = 480, H = 600;
 
-// ─── UI elements ─────────────────────────────────────────────────────────────
 const scoreEl  = document.getElementById('score-display');
 const livesEl  = document.getElementById('lives-display');
 const weaponEl = document.getElementById('weapon-display');
 const hiEl     = document.getElementById('hi-display');
 
-// ─── Game state ──────────────────────────────────────────────────────────────
-let state       = 'title';   // title | playing | dead | gameover
-let score       = 0;
-let hiScore     = 0;
-let lives       = 3;
-let frameCount  = 0;
-let diffTimer   = 0;         // increases difficulty over time
-let deathTimer  = 0;
+// ─── Game state ───────────────────────────────────────────────────────────────
+let state      = 'title';
+let score      = 0;
+let hiScore    = 0;
+let lives      = 3;
+let frameCount = 0;
+let diffTimer  = 0;
+let deathTimer = 0;
 
-// ─── Road constants ──────────────────────────────────────────────────────────
+// ─── Road geometry (base) ─────────────────────────────────────────────────────
 const ROAD_LEFT  = 80;
 const ROAD_RIGHT = 400;
 const ROAD_W     = ROAD_RIGHT - ROAD_LEFT;   // 320
-const LANE_W     = ROAD_W / 3;               // ~107 each lane
+const ROAD_MID   = ROAD_LEFT + ROAD_W / 2;   // 240
+const LANE_W     = ROAD_W / 3;
 
-// ─── Road scroll ─────────────────────────────────────────────────────────────
+// ─── Speed ────────────────────────────────────────────────────────────────────
 let roadY = 0;
 const ROAD_SPEED_MIN  = 2;
 const ROAD_SPEED_MAX  = 12;
-const ROAD_SPEED_BASE = 5;   // starting speed
+const ROAD_SPEED_BASE = 5;
 let roadSpeed = ROAD_SPEED_BASE;
 
-// ─── Player ──────────────────────────────────────────────────────────────────
+// ─── Fork system ──────────────────────────────────────────────────────────────
+// Phases: 'normal' → 'splitting' → 'split' → 'merging' → 'normal'
+// We track by world-distance (roadDist increments each frame by roadSpeed)
+let roadDist   = 0;   // total distance scrolled (world units)
+let nextFork   = 1800; // distance at which next fork starts
+
+// fork object while active
+// { phase, startDist, island: {left,right,top=scrollY} }
+// left lane: ROAD_LEFT .. islandLeft
+// right lane: islandRight .. ROAD_RIGHT
+// island centre scrolls down; left/right edges animate outward then inward
+
+const FORK_TRANSITION = 200;   // world units for split/merge animation
+const FORK_HOLD       = 800;   // world units for fully-split section
+const ISLAND_W_MAX    = 80;    // max island width when fully split
+const ISLAND_W_MIN    = 0;
+
+let fork = null;   // null = normal road
+
+// Compute current road geometry at any moment
+// Returns { left, right, islandLeft, islandRight, hasFork }
+function getRoadGeom() {
+    if (!fork) return { left: ROAD_LEFT, right: ROAD_RIGHT, hasFork: false };
+
+    const elapsed = roadDist - fork.startDist;
+    let t = 0; // 0=closed, 1=fully open
+
+    if (fork.phase === 'splitting') {
+        t = Math.min(elapsed / FORK_TRANSITION, 1);
+    } else if (fork.phase === 'split') {
+        t = 1;
+    } else if (fork.phase === 'merging') {
+        t = 1 - Math.min(elapsed / FORK_TRANSITION, 1);
+    }
+
+    const halfIsland = (ISLAND_W_MAX / 2) * t;
+    return {
+        left:        ROAD_LEFT,
+        right:       ROAD_RIGHT,
+        hasFork:     t > 0.05,
+        islandLeft:  ROAD_MID - halfIsland,
+        islandRight: ROAD_MID + halfIsland,
+        t,
+    };
+}
+
+function updateFork() {
+    roadDist += roadSpeed;
+
+    if (!fork) {
+        if (roadDist >= nextFork) {
+            fork = { phase: 'splitting', startDist: roadDist };
+        }
+        return;
+    }
+
+    const elapsed = roadDist - fork.startDist;
+
+    if (fork.phase === 'splitting' && elapsed >= FORK_TRANSITION) {
+        fork.phase = 'split';
+        fork.startDist = roadDist;
+    } else if (fork.phase === 'split' && elapsed >= FORK_HOLD) {
+        fork.phase = 'merging';
+        fork.startDist = roadDist;
+    } else if (fork.phase === 'merging' && elapsed >= FORK_TRANSITION) {
+        fork = null;
+        nextFork = roadDist + rand(1200, 2400);
+    }
+}
+
+// ─── Player ───────────────────────────────────────────────────────────────────
 const PLAYER_W = 24, PLAYER_H = 44;
 let player = {
-    x: W / 2,
-    y: H - 100,
-    speed: 0,
+    x: W / 2, y: H - 100,
     vx: 0,
-    invincible: 0,   // frames of invincibility after respawn
+    invincible: 0,
     weapons: ['GUNS'],
     weaponIdx: 0,
     oilCount: 0,
     smokeCount: 0,
 };
 
-function playerWeapon() { return player.weapons[player.weaponIdx]; }
-
-// ─── Bullets ─────────────────────────────────────────────────────────────────
-let bullets   = [];   // player bullets
-let eBullets  = [];   // enemy bullets
-
-// ─── Oil slicks / smoke ──────────────────────────────────────────────────────
-let oilSlicks = [];
-let smokeClouds = [];
-
-// ─── Enemies ─────────────────────────────────────────────────────────────────
-let enemies   = [];
-let explosions = [];
-
-// ─── Weapons truck ───────────────────────────────────────────────────────────
-let truck = null;
-let truckTimer = 0;
-const TRUCK_INTERVAL = 1200;   // frames between truck appearances
-
-// ─── Scenery ─────────────────────────────────────────────────────────────────
+// ─── Collections ─────────────────────────────────────────────────────────────
+let bullets = [], eBullets = [], enemies = [], explosions = [];
+let oilSlicks = [], smokeClouds = [];
+let truck = null, truckTimer = 0;
+const TRUCK_INTERVAL = 1200;
 let trees = [];
 
-// ─── Input ───────────────────────────────────────────────────────────────────
+// ─── Input ────────────────────────────────────────────────────────────────────
 const keys = {};
 document.addEventListener('keydown', e => {
     keys[e.code] = true;
-    if (state === 'title' && (e.code === 'Space' || e.code === 'Enter')) startGame();
+    if (state === 'title'    && (e.code === 'Space' || e.code === 'Enter')) startGame();
     if (state === 'gameover' && (e.code === 'Space' || e.code === 'Enter')) startGame();
     if (state === 'playing') {
         if (e.code === 'Space') fireBullet();
@@ -133,72 +185,84 @@ document.addEventListener('keyup', e => { keys[e.code] = false; });
 function rand(a, b)  { return a + Math.random() * (b - a); }
 function randi(a, b) { return Math.floor(rand(a, b + 1)); }
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
-
 function rectOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
-    return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+    return ax < bx+bw && ax+aw > bx && ay < by+bh && ay+ah > by;
 }
 
-// ─── Init / start ─────────────────────────────────────────────────────────────
+// ─── Init ─────────────────────────────────────────────────────────────────────
 function startGame() {
-    state       = 'playing';
-    score       = 0;
-    lives       = 3;
-    frameCount  = 0;
-    diffTimer   = 0;
-    roadSpeed   = ROAD_SPEED_BASE;
-    player.vy   = 0;
-    bullets     = [];
-    eBullets    = [];
-    enemies     = [];
-    explosions  = [];
-    oilSlicks   = [];
-    smokeClouds = [];
-    trees       = [];
-    truck       = null;
-    truckTimer  = 0;
-    player.x    = W / 2;
-    player.y    = H - 100;
-    player.vx   = 0;
+    state = 'playing'; score = 0; lives = 3;
+    frameCount = 0; diffTimer = 0;
+    roadSpeed = ROAD_SPEED_BASE; roadDist = 0; nextFork = 1800; fork = null;
+    bullets = []; eBullets = []; enemies = []; explosions = [];
+    oilSlicks = []; smokeClouds = []; trees = [];
+    truck = null; truckTimer = 0;
+    player.x = W/2; player.y = H-100; player.vx = 0;
     player.invincible = 120;
-    player.weapons  = ['GUNS'];
-    player.weaponIdx = 0;
-    player.oilCount  = 0;
-    player.smokeCount= 0;
+    player.weapons = ['GUNS']; player.weaponIdx = 0;
+    player.oilCount = 0; player.smokeCount = 0;
     spawnTrees();
     updateUI();
 }
 
 // ─── Road drawing ─────────────────────────────────────────────────────────────
 function drawRoad() {
-    // Grass
+    const g = getRoadGeom();
+
+    // Grass background
     ctx.fillStyle = '#2d6a2d';
     ctx.fillRect(0, 0, W, H);
 
     // Road surface
     ctx.fillStyle = '#555';
-    ctx.fillRect(ROAD_LEFT, 0, ROAD_W, H);
+    ctx.fillRect(g.left, 0, g.right - g.left, H);
 
-    // Kerb stripes (animated)
+    // Island (grass strip down the middle during fork)
+    if (g.hasFork) {
+        const iw = g.islandRight - g.islandLeft;
+        ctx.fillStyle = '#2d6a2d';
+        ctx.fillRect(g.islandLeft, 0, iw, H);
+
+        // Island kerb — left edge
+        drawKerb(g.islandLeft, g.islandLeft + 6, false);
+        // Island kerb — right edge
+        drawKerb(g.islandRight - 6, g.islandRight, true);
+
+        // Lane dashes for left lane only
+        drawLaneDashes(g.left + 8, g.islandLeft - 8, 1);
+        // Lane dashes for right lane only
+        drawLaneDashes(g.islandRight + 8, g.right - 8, 1);
+    } else {
+        drawLaneDashes(g.left + 8, g.right - 8, 2);
+    }
+
+    // Outer kerbs
+    drawKerb(g.left, g.left + 8, false);
+    drawKerb(g.right - 8, g.right, true);
+}
+
+function drawKerb(x1, x2, flip) {
     const stripeH = 40;
     const offset  = roadY % (stripeH * 2);
-    ctx.fillStyle = '#cc2222';
-    for (let y = -stripeH * 2 + offset; y < H + stripeH; y += stripeH * 2) {
-        ctx.fillRect(ROAD_LEFT,            y, 8, stripeH);
-        ctx.fillRect(ROAD_RIGHT - 8,       y, 8, stripeH);
+    const w = x2 - x1;
+    ctx.fillStyle = flip ? '#fff' : '#cc2222';
+    for (let y = -stripeH*2 + offset; y < H + stripeH; y += stripeH*2) {
+        ctx.fillRect(x1, y, w, stripeH);
     }
-    ctx.fillStyle = '#fff';
-    for (let y = -stripeH * 2 + offset + stripeH; y < H + stripeH; y += stripeH * 2) {
-        ctx.fillRect(ROAD_LEFT,            y, 8, stripeH);
-        ctx.fillRect(ROAD_RIGHT - 8,       y, 8, stripeH);
+    ctx.fillStyle = flip ? '#cc2222' : '#fff';
+    for (let y = -stripeH*2 + offset + stripeH; y < H + stripeH; y += stripeH*2) {
+        ctx.fillRect(x1, y, w, stripeH);
     }
+}
 
-    // Lane dashes
+function drawLaneDashes(x1, x2, numLanes) {
     ctx.strokeStyle = '#aaa';
     ctx.lineWidth   = 2;
     ctx.setLineDash([20, 20]);
     ctx.lineDashOffset = -roadY;
-    for (let lane = 1; lane <= 2; lane++) {
-        const lx = ROAD_LEFT + lane * LANE_W;
+    const w = x2 - x1;
+    for (let l = 1; l < numLanes; l++) {
+        const lx = x1 + (w / numLanes) * l;
         ctx.beginPath();
         ctx.moveTo(lx, 0);
         ctx.lineTo(lx, H);
@@ -207,12 +271,77 @@ function drawRoad() {
     ctx.setLineDash([]);
 }
 
+// ─── Island trees (appear in split section) ───────────────────────────────────
+let islandTrees = [];
+let islandTreeTimer = 0;
+
+function updateIslandTrees() {
+    const g = getRoadGeom();
+    if (!g.hasFork || g.t < 0.95) { islandTrees = []; islandTreeTimer = 0; return; }
+
+    islandTreeTimer++;
+    if (islandTreeTimer % 80 === 0) {
+        const ix = (g.islandLeft + g.islandRight) / 2;
+        islandTrees.push({ x: ix + rand(-8, 8), y: -20 });
+    }
+    for (let i = islandTrees.length - 1; i >= 0; i--) {
+        islandTrees[i].y += roadSpeed;
+        if (islandTrees[i].y > H + 20) islandTrees.splice(i, 1);
+    }
+}
+
+function drawIslandTrees() {
+    for (const t of islandTrees) {
+        ctx.fillStyle = '#7a4e2d';
+        ctx.fillRect(t.x - 2, t.y - 4, 4, 8);
+        ctx.fillStyle = '#1e6e1e';
+        ctx.beginPath();
+        ctx.arc(t.x, t.y - 8, 9, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+// ─── Road-split sign ─────────────────────────────────────────────────────────
+let splitSign = null;
+
+function updateSplitSign() {
+    if (fork && fork.phase === 'splitting' && !splitSign) {
+        splitSign = { y: -30 };
+    }
+    if (splitSign) {
+        splitSign.y += roadSpeed;
+        if (splitSign.y > H + 40) splitSign = null;
+    }
+    if (!fork) splitSign = null;
+}
+
+function drawSplitSign() {
+    if (!splitSign) return;
+    const g = getRoadGeom();
+    const sx = ROAD_MID;
+    const sy = splitSign.y;
+    ctx.fillStyle = '#ffdd00';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy - 16);
+    ctx.lineTo(sx + 14, sy + 10);
+    ctx.lineTo(sx - 14, sy + 10);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#000';
+    ctx.font = 'bold 11px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText('!', sx, sy + 7);
+}
+
 // ─── Trees ────────────────────────────────────────────────────────────────────
 function spawnTrees() {
     trees = [];
     for (let i = 0; i < 20; i++) {
-        trees.push({ x: rand(5, ROAD_LEFT - 10), y: rand(-H, H), side: 0 });
-        trees.push({ x: rand(ROAD_RIGHT + 10, W - 10), y: rand(-H, H), side: 1 });
+        trees.push({ x: rand(5, ROAD_LEFT-10), y: rand(-H, H), side: 0 });
+        trees.push({ x: rand(ROAD_RIGHT+10, W-10), y: rand(-H, H), side: 1 });
     }
 }
 
@@ -221,57 +350,84 @@ function updateTrees() {
         t.y += roadSpeed;
         if (t.y > H + 20) {
             t.y = rand(-100, -20);
-            t.x = t.side === 0 ? rand(5, ROAD_LEFT - 10) : rand(ROAD_RIGHT + 10, W - 10);
+            t.x = t.side === 0 ? rand(5, ROAD_LEFT-10) : rand(ROAD_RIGHT+10, W-10);
         }
     }
 }
 
 function drawTrees() {
     for (const t of trees) {
-        // Trunk
         ctx.fillStyle = '#7a4e2d';
-        ctx.fillRect(t.x - 3, t.y - 6, 6, 10);
-        // Canopy
+        ctx.fillRect(t.x-3, t.y-6, 6, 10);
         ctx.fillStyle = '#1e6e1e';
         ctx.beginPath();
-        ctx.arc(t.x, t.y - 10, 12, 0, Math.PI * 2);
+        ctx.arc(t.x, t.y-10, 12, 0, Math.PI*2);
         ctx.fill();
     }
 }
 
-// ─── Player car drawing ──────────────────────────────────────────────────────
+// ─── Car drawing ──────────────────────────────────────────────────────────────
 function drawCar(x, y, color, bodyColor, w, h, blink) {
     if (blink) return;
-    const hw = w / 2, hh = h / 2;
-    // Body
+    const hw = w/2, hh = h/2;
     ctx.fillStyle = bodyColor;
-    ctx.fillRect(x - hw + 3, y - hh, w - 6, h);
-    // Roof
+    ctx.fillRect(x-hw+3, y-hh, w-6, h);
     ctx.fillStyle = color;
-    ctx.fillRect(x - hw + 5, y - hh + 8, w - 10, h - 18);
-    // Windscreen
+    ctx.fillRect(x-hw+5, y-hh+8, w-10, h-18);
     ctx.fillStyle = '#88ccff';
-    ctx.fillRect(x - hw + 6, y - hh + 10, w - 12, 10);
-    // Wheels
+    ctx.fillRect(x-hw+6, y-hh+10, w-12, 10);
     ctx.fillStyle = '#111';
-    ctx.fillRect(x - hw,     y - hh + 4,  5, 10);
-    ctx.fillRect(x + hw - 5, y - hh + 4,  5, 10);
-    ctx.fillRect(x - hw,     y + hh - 14, 5, 10);
-    ctx.fillRect(x + hw - 5, y + hh - 14, 5, 10);
+    ctx.fillRect(x-hw,     y-hh+4,  5, 10);
+    ctx.fillRect(x+hw-5,   y-hh+4,  5, 10);
+    ctx.fillRect(x-hw,     y+hh-14, 5, 10);
+    ctx.fillRect(x+hw-5,   y+hh-14, 5, 10);
 }
 
 function drawPlayer() {
-    const blink = player.invincible > 0 && Math.floor(frameCount / 4) % 2 === 0;
+    const blink = player.invincible > 0 && Math.floor(frameCount/4)%2 === 0;
     drawCar(player.x, player.y, '#cc2222', '#dd3333', PLAYER_W, PLAYER_H, blink);
-    // Gun barrel
     if (!blink) {
         ctx.fillStyle = '#888';
-        ctx.fillRect(player.x - 2, player.y - PLAYER_H / 2 - 6, 4, 8);
+        ctx.fillRect(player.x-2, player.y - PLAYER_H/2 - 6, 4, 8);
     }
 }
 
-// ─── Enemy types ──────────────────────────────────────────────────────────────
-//  type: car | truck | chopper | bike
+// ─── Player movement ──────────────────────────────────────────────────────────
+function updatePlayer() {
+    if (player.invincible > 0) player.invincible--;
+
+    const speedAccel = 0.15;
+    if (keys['ArrowUp']   || keys['KeyW']) roadSpeed = clamp(roadSpeed + speedAccel, ROAD_SPEED_MIN, ROAD_SPEED_MAX);
+    if (keys['ArrowDown'] || keys['KeyS']) roadSpeed = clamp(roadSpeed - speedAccel, ROAD_SPEED_MIN, ROAD_SPEED_MAX);
+
+    const accel = 0.5, friction = 0.85, maxVX = 4;
+    if (keys['ArrowLeft']  || keys['KeyA']) player.vx -= accel;
+    if (keys['ArrowRight'] || keys['KeyD']) player.vx += accel;
+    player.vx *= friction;
+    player.vx  = clamp(player.vx, -maxVX, maxVX);
+    player.x  += player.vx;
+
+    // Clamp player to driveable road (keep out of island)
+    const g = getRoadGeom();
+    const hw = PLAYER_W / 2;
+    if (g.hasFork && g.t > 0.5) {
+        const iL = g.islandLeft, iR = g.islandRight;
+        const mid = (iL + iR) / 2;
+        if (player.x < mid) {
+            // Left lane
+            player.x = clamp(player.x, g.left + hw + 8, iL - hw);
+        } else {
+            // Right lane
+            player.x = clamp(player.x, iR + hw, g.right - hw - 8);
+        }
+    } else {
+        player.x = clamp(player.x, g.left + hw + 8, g.right - hw - 8);
+    }
+
+    if (keys['Space']) fireBullet();
+}
+
+// ─── Enemies ──────────────────────────────────────────────────────────────────
 const ENEMY_DEFS = {
     car:     { w:22, h:40, color:'#ddaa00', body:'#cccc00', hp:1, score:100, speed:1.5 },
     enforcer:{ w:22, h:40, color:'#8844cc', body:'#aa55dd', hp:2, score:200, speed:2.0, shoots:true },
@@ -285,10 +441,23 @@ function spawnEnemy() {
         : diffTimer < 1200
         ? ['car','car','enforcer','bike','truck']
         : ['car','enforcer','enforcer','bike','truck','enforcer'];
-    const type = pool[randi(0, pool.length - 1)];
+    const type = pool[randi(0, pool.length-1)];
     const def  = ENEMY_DEFS[type];
-    const lane = randi(0, 2);
-    const laneX = ROAD_LEFT + lane * LANE_W + LANE_W / 2;
+    const g    = getRoadGeom();
+
+    let laneX;
+    if (g.hasFork && g.t > 0.8) {
+        // spawn in one of the two split lanes
+        if (Math.random() < 0.5) {
+            laneX = (g.left + g.islandLeft) / 2;
+        } else {
+            laneX = (g.islandRight + g.right) / 2;
+        }
+    } else {
+        const lane = randi(0, 2);
+        laneX = ROAD_LEFT + lane * LANE_W + LANE_W / 2;
+    }
+
     enemies.push({
         type, x: laneX, y: -def.h,
         vx: 0, vy: def.speed,
@@ -304,45 +473,50 @@ function spawnEnemy() {
 }
 
 function updateEnemies() {
-    const spawnRate = Math.max(40, 90 - Math.floor(diffTimer / 100));
+    const spawnRate = Math.max(40, 90 - Math.floor(diffTimer/100));
     if (frameCount % spawnRate === 0) spawnEnemy();
 
-    for (let i = enemies.length - 1; i >= 0; i--) {
+    const g = getRoadGeom();
+
+    for (let i = enemies.length-1; i >= 0; i--) {
         const e = enemies[i];
-        // Move relative to player speed — positive vy means enemy moves toward player
-        // At roadSpeed they scroll with the road; faster = approaching, slower = falling back
         e.y += e.vy + roadSpeed;
 
         if (e.zigzag) {
             e.zigTimer++;
             e.vx = Math.sin(e.zigTimer * 0.08) * 2;
             e.x += e.vx;
-            e.x = clamp(e.x, ROAD_LEFT + e.w / 2, ROAD_RIGHT - e.w / 2);
+        }
+
+        // Keep enemies in driveable road
+        if (g.hasFork && g.t > 0.5) {
+            const mid = (g.islandLeft + g.islandRight) / 2;
+            if (e.x < mid) {
+                e.x = clamp(e.x, g.left + e.w/2 + 8, g.islandLeft - e.w/2);
+            } else {
+                e.x = clamp(e.x, g.islandRight + e.w/2, g.right - e.w/2 - 8);
+            }
+        } else {
+            e.x = clamp(e.x, g.left + e.w/2 + 8, g.right - e.w/2 - 8);
         }
 
         if (e.shoots) {
             e.shootTimer--;
             if (e.shootTimer <= 0) {
-                eBullets.push({ x: e.x, y: e.y + e.h / 2, vy: roadSpeed + 3 });
+                eBullets.push({ x: e.x, y: e.y + e.h/2, vy: roadSpeed+3 });
                 e.shootTimer = randi(80, 160);
             }
         }
 
-        // Off screen
-        if (e.y > H + e.h) {
-            enemies.splice(i, 1);
-            continue;
-        }
+        if (e.y > H + e.h) { enemies.splice(i, 1); continue; }
 
-        // Collision with player
         if (player.invincible <= 0 &&
-            rectOverlap(e.x - e.w/2, e.y - e.h/2, e.w, e.h,
-                        player.x - PLAYER_W/2, player.y - PLAYER_H/2, PLAYER_W, PLAYER_H)) {
+            rectOverlap(e.x-e.w/2, e.y-e.h/2, e.w, e.h,
+                        player.x-PLAYER_W/2, player.y-PLAYER_H/2, PLAYER_W, PLAYER_H)) {
             spawnExplosion(player.x, player.y, '#ff4400', 12);
             spawnExplosion(e.x, e.y, '#ffaa00', 8);
             enemies.splice(i, 1);
             hitPlayer();
-            continue;
         }
     }
 }
@@ -350,136 +524,100 @@ function updateEnemies() {
 function drawEnemies() {
     for (const e of enemies) {
         drawCar(e.x, e.y, e.color, e.body, e.w, e.h, false);
-        // HP bar for trucks / enforcers
         if (e.maxhp > 1) {
             ctx.fillStyle = '#333';
-            ctx.fillRect(e.x - e.w/2, e.y - e.h/2 - 6, e.w, 4);
+            ctx.fillRect(e.x-e.w/2, e.y-e.h/2-6, e.w, 4);
             ctx.fillStyle = '#0f0';
-            ctx.fillRect(e.x - e.w/2, e.y - e.h/2 - 6, e.w * (e.hp / e.maxhp), 4);
+            ctx.fillRect(e.x-e.w/2, e.y-e.h/2-6, e.w*(e.hp/e.maxhp), 4);
         }
     }
 }
 
-// ─── Weapons truck (friendly) ─────────────────────────────────────────────────
+// ─── Weapons truck ────────────────────────────────────────────────────────────
 function spawnWeaponsTruck() {
-    truck = {
-        x: ROAD_LEFT + LANE_W / 2,
-        y: -60,
-        w: 34, h: 60,
-        speed: ROAD_SPEED_BASE * 0.6,
-        collected: false,
-    };
+    truck = { x: ROAD_LEFT + LANE_W/2, y: -60, w: 34, h: 60, collected: false };
 }
 
 function updateTruck() {
     if (!truck) {
         truckTimer++;
-        if (truckTimer >= TRUCK_INTERVAL) {
-            truckTimer = 0;
-            spawnWeaponsTruck();
-        }
+        if (truckTimer >= TRUCK_INTERVAL) { truckTimer = 0; spawnWeaponsTruck(); }
         return;
     }
-    truck.y += truck.speed;
-    if (truck.y > H + 80) { truck = null; return; }
-
-    // Player drives into truck to collect
+    truck.y += ROAD_SPEED_BASE * 0.6;
+    if (truck.y > H+80) { truck = null; return; }
     if (!truck.collected &&
-        rectOverlap(truck.x - truck.w/2, truck.y - truck.h/2, truck.w, truck.h,
-                    player.x - PLAYER_W/2, player.y - PLAYER_H/2, PLAYER_W, PLAYER_H)) {
+        rectOverlap(truck.x-truck.w/2, truck.y-truck.h/2, truck.w, truck.h,
+                    player.x-PLAYER_W/2, player.y-PLAYER_H/2, PLAYER_W, PLAYER_H)) {
         truck.collected = true;
-        collectWeapons();
-        spawnExplosion(truck.x, truck.y - 20, '#44ffaa', 6);
+        player.oilCount += 3; player.smokeCount += 3;
+        if (!player.weapons.includes('OIL'))   player.weapons.push('OIL');
+        if (!player.weapons.includes('SMOKE')) player.weapons.push('SMOKE');
+        score += 500;
+        spawnExplosion(truck.x, truck.y-20, '#44ffaa', 6);
         truck = null;
+        updateUI();
     }
-}
-
-function collectWeapons() {
-    player.oilCount   += 3;
-    player.smokeCount += 3;
-    if (!player.weapons.includes('OIL'))   player.weapons.push('OIL');
-    if (!player.weapons.includes('SMOKE')) player.weapons.push('SMOKE');
-    score += 500;
-    updateUI();
 }
 
 function drawTruck() {
     if (!truck) return;
     const t = truck;
-    // Big green friendly truck
     ctx.fillStyle = '#116611';
-    ctx.fillRect(t.x - t.w/2 + 2, t.y - t.h/2, t.w - 4, t.h);
+    ctx.fillRect(t.x-t.w/2+2, t.y-t.h/2, t.w-4, t.h);
     ctx.fillStyle = '#22aa22';
-    ctx.fillRect(t.x - t.w/2 + 4, t.y - t.h/2 + 6, t.w - 8, t.h - 16);
-    // Label
+    ctx.fillRect(t.x-t.w/2+4, t.y-t.h/2+6, t.w-8, t.h-16);
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 7px Courier New';
     ctx.textAlign = 'center';
     ctx.fillText('WEAPONS', t.x, t.y);
-    // Wheels
     ctx.fillStyle = '#111';
-    ctx.fillRect(t.x - t.w/2,     t.y - t.h/2 + 4,  6, 12);
-    ctx.fillRect(t.x + t.w/2 - 6, t.y - t.h/2 + 4,  6, 12);
-    ctx.fillRect(t.x - t.w/2,     t.y + t.h/2 - 16,  6, 12);
-    ctx.fillRect(t.x + t.w/2 - 6, t.y + t.h/2 - 16,  6, 12);
+    ctx.fillRect(t.x-t.w/2,     t.y-t.h/2+4,  6, 12);
+    ctx.fillRect(t.x+t.w/2-6,   t.y-t.h/2+4,  6, 12);
+    ctx.fillRect(t.x-t.w/2,     t.y+t.h/2-16, 6, 12);
+    ctx.fillRect(t.x+t.w/2-6,   t.y+t.h/2-16, 6, 12);
 }
 
-// ─── Bullets ──────────────────────────────────────────────────────────────────
+// ─── Bullets ─────────────────────────────────────────────────────────────────
 let shootCooldown = 0;
 
 function fireBullet() {
     if (shootCooldown > 0) return;
-    bullets.push({ x: player.x, y: player.y - PLAYER_H / 2 - 6, vy: -14 });
+    bullets.push({ x: player.x, y: player.y - PLAYER_H/2 - 6, vy: -14 });
     shootCooldown = 8;
 }
 
 function updateBullets() {
     if (shootCooldown > 0) shootCooldown--;
 
-    // Player bullets
-    for (let i = bullets.length - 1; i >= 0; i--) {
+    for (let i = bullets.length-1; i >= 0; i--) {
         const b = bullets[i];
         b.y += b.vy;
         if (b.y < -10) { bullets.splice(i, 1); continue; }
-
-        // Hit enemy
         let hit = false;
-        for (let j = enemies.length - 1; j >= 0; j--) {
+        for (let j = enemies.length-1; j >= 0; j--) {
             const e = enemies[j];
-            if (rectOverlap(b.x - 2, b.y - 6, 4, 12, e.x - e.w/2, e.y - e.h/2, e.w, e.h)) {
+            if (rectOverlap(b.x-2, b.y-6, 4, 12, e.x-e.w/2, e.y-e.h/2, e.w, e.h)) {
                 e.hp--;
-                if (e.hp <= 0) {
-                    score += e.score;
-                    spawnExplosion(e.x, e.y, '#ffaa00', 8);
-                    enemies.splice(j, 1);
-                    updateUI();
-                }
-                bullets.splice(i, 1);
-                hit = true;
-                break;
+                if (e.hp <= 0) { score += e.score; spawnExplosion(e.x, e.y, '#ffaa00', 8); enemies.splice(j, 1); updateUI(); }
+                bullets.splice(i, 1); hit = true; break;
             }
         }
         if (hit) continue;
-
-        // Hit oil slick (clear it)
-        for (let j = oilSlicks.length - 1; j >= 0; j--) {
+        for (let j = oilSlicks.length-1; j >= 0; j--) {
             const o = oilSlicks[j];
-            if (rectOverlap(b.x - 2, b.y - 6, 4, 12, o.x - 16, o.y - 10, 32, 20)) {
-                oilSlicks.splice(j, 1);
-                bullets.splice(i, 1);
-                hit = true;
-                break;
+            if (rectOverlap(b.x-2, b.y-6, 4, 12, o.x-16, o.y-10, 32, 20)) {
+                oilSlicks.splice(j, 1); bullets.splice(i, 1); hit = true; break;
             }
         }
     }
 
-    // Enemy bullets
-    for (let i = eBullets.length - 1; i >= 0; i--) {
+    for (let i = eBullets.length-1; i >= 0; i--) {
         const b = eBullets[i];
         b.y += b.vy;
-        if (b.y > H + 10) { eBullets.splice(i, 1); continue; }
+        if (b.y > H+10) { eBullets.splice(i, 1); continue; }
         if (player.invincible <= 0 &&
-            rectOverlap(b.x - 3, b.y - 3, 6, 6, player.x - PLAYER_W/2, player.y - PLAYER_H/2, PLAYER_W, PLAYER_H)) {
+            rectOverlap(b.x-3, b.y-3, 6, 6, player.x-PLAYER_W/2, player.y-PLAYER_H/2, PLAYER_W, PLAYER_H)) {
             eBullets.splice(i, 1);
             spawnExplosion(player.x, player.y, '#ff4400', 10);
             hitPlayer();
@@ -489,74 +627,50 @@ function updateBullets() {
 
 function drawBullets() {
     ctx.fillStyle = '#ffff44';
-    for (const b of bullets) {
-        ctx.fillRect(b.x - 2, b.y - 5, 4, 10);
-    }
+    for (const b of bullets) ctx.fillRect(b.x-2, b.y-5, 4, 10);
     ctx.fillStyle = '#ff4444';
-    for (const b of eBullets) {
-        ctx.beginPath();
-        ctx.arc(b.x, b.y, 4, 0, Math.PI * 2);
-        ctx.fill();
-    }
+    for (const b of eBullets) { ctx.beginPath(); ctx.arc(b.x, b.y, 4, 0, Math.PI*2); ctx.fill(); }
 }
 
-// ─── Special weapons ─────────────────────────────────────────────────────────
+// ─── Special weapons ──────────────────────────────────────────────────────────
 function useWeapon(type) {
     if (type === 'OIL' && player.oilCount > 0) {
         player.oilCount--;
-        oilSlicks.push({ x: player.x, y: player.y + PLAYER_H / 2 + 10, life: 300 });
+        oilSlicks.push({ x: player.x, y: player.y + PLAYER_H/2 + 10, life: 300 });
         updateUI();
     }
     if (type === 'SMOKE' && player.smokeCount > 0) {
         player.smokeCount--;
-        smokeClouds.push({ x: player.x, y: player.y + PLAYER_H / 2, life: 180, r: 20 });
+        smokeClouds.push({ x: player.x, y: player.y + PLAYER_H/2, life: 180, r: 20 });
         updateUI();
     }
 }
 
 function updateOilAndSmoke() {
-    // Oil slicks are fixed on the road — scroll downward at road speed
-    // Enemies coming from the top approach them; if an enemy reaches an oil slick it spins out
-    for (let i = oilSlicks.length - 1; i >= 0; i--) {
+    for (let i = oilSlicks.length-1; i >= 0; i--) {
         const o = oilSlicks[i];
-        o.y += roadSpeed;   // road-fixed position scrolls toward bottom
-        o.life--;
-        if (o.life <= 0 || o.y > H + 30) { oilSlicks.splice(i, 1); continue; }
-
-        // Enemy drives over oil slick
+        o.y += roadSpeed; o.life--;
+        if (o.life <= 0 || o.y > H+30) { oilSlicks.splice(i, 1); continue; }
         let hit = false;
-        for (let j = enemies.length - 1; j >= 0; j--) {
+        for (let j = enemies.length-1; j >= 0; j--) {
             const e = enemies[j];
-            if (rectOverlap(o.x - 20, o.y - 14, 40, 28, e.x - e.w/2, e.y - e.h/2, e.w, e.h)) {
-                score += e.score;
-                spawnExplosion(e.x, e.y, '#ffaa00', 10);
-                enemies.splice(j, 1);
-                oilSlicks.splice(i, 1);
-                updateUI();
-                hit = true;
-                break;
+            if (rectOverlap(o.x-20, o.y-14, 40, 28, e.x-e.w/2, e.y-e.h/2, e.w, e.h)) {
+                score += e.score; spawnExplosion(e.x, e.y, '#ffaa00', 10);
+                enemies.splice(j, 1); oilSlicks.splice(i, 1); updateUI(); hit = true; break;
             }
         }
-        if (hit) continue;
     }
 
-    // Smoke clouds are also road-fixed, expanding as they scroll
-    // Any enemy that enters the cloud crashes
-    for (let i = smokeClouds.length - 1; i >= 0; i--) {
+    for (let i = smokeClouds.length-1; i >= 0; i--) {
         const s = smokeClouds[i];
-        s.y += roadSpeed;
-        s.r  = Math.min(s.r + 0.5, 50);
-        s.life--;
-        if (s.life <= 0 || s.y > H + 80) { smokeClouds.splice(i, 1); continue; }
-
-        for (let j = enemies.length - 1; j >= 0; j--) {
+        s.y += roadSpeed; s.r = Math.min(s.r + 0.5, 50); s.life--;
+        if (s.life <= 0 || s.y > H+80) { smokeClouds.splice(i, 1); continue; }
+        for (let j = enemies.length-1; j >= 0; j--) {
             const e = enemies[j];
-            const dx = e.x - s.x, dy = e.y - s.y;
-            if (Math.sqrt(dx*dx + dy*dy) < s.r + e.w/2) {
-                score += e.score;
-                spawnExplosion(e.x, e.y, '#aaaaaa', 8);
-                enemies.splice(j, 1);
-                updateUI();
+            const dx = e.x-s.x, dy = e.y-s.y;
+            if (Math.sqrt(dx*dx+dy*dy) < s.r+e.w/2) {
+                score += e.score; spawnExplosion(e.x, e.y, '#aaaaaa', 8);
+                enemies.splice(j, 1); updateUI();
             }
         }
     }
@@ -565,195 +679,115 @@ function updateOilAndSmoke() {
 function drawOilAndSmoke() {
     for (const o of oilSlicks) {
         ctx.fillStyle = 'rgba(0,0,80,0.7)';
-        ctx.beginPath();
-        ctx.ellipse(o.x, o.y, 18, 10, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(0,100,200,0.5)';
-        ctx.lineWidth = 1;
-        ctx.stroke();
+        ctx.beginPath(); ctx.ellipse(o.x, o.y, 18, 10, 0, 0, Math.PI*2); ctx.fill();
+        ctx.strokeStyle = 'rgba(0,100,200,0.5)'; ctx.lineWidth = 1; ctx.stroke();
     }
     for (const s of smokeClouds) {
-        const alpha = Math.min(0.6, s.life / 60);
-        ctx.fillStyle = `rgba(200,200,200,${alpha})`;
-        ctx.beginPath();
-        ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.fillStyle = `rgba(200,200,200,${Math.min(0.6, s.life/60)})`;
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
     }
 }
 
 // ─── Explosions ───────────────────────────────────────────────────────────────
 function spawnExplosion(x, y, color, count) {
     for (let i = 0; i < count; i++) {
-        const angle = rand(0, Math.PI * 2);
-        const speed = rand(1, 5);
-        explosions.push({
-            x, y,
-            vx: Math.cos(angle) * speed,
-            vy: Math.sin(angle) * speed,
-            life: randi(20, 40),
-            color,
-            r: rand(2, 6),
-        });
+        const a = rand(0, Math.PI*2), sp = rand(1, 5);
+        explosions.push({ x, y, vx: Math.cos(a)*sp, vy: Math.sin(a)*sp,
+                          life: randi(20,40), color, r: rand(2,6) });
     }
 }
 
 function updateExplosions() {
-    for (let i = explosions.length - 1; i >= 0; i--) {
+    for (let i = explosions.length-1; i >= 0; i--) {
         const p = explosions[i];
-        p.x += p.vx;
-        p.y += p.vy + roadSpeed * 0.2;
-        p.life--;
-        p.r *= 0.96;
+        p.x += p.vx; p.y += p.vy + roadSpeed*0.2; p.life--; p.r *= 0.96;
         if (p.life <= 0) explosions.splice(i, 1);
     }
 }
 
 function drawExplosions() {
     for (const p of explosions) {
-        ctx.globalAlpha = p.life / 40;
-        ctx.fillStyle   = p.color;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.globalAlpha = p.life/40;
+        ctx.fillStyle = p.color;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2); ctx.fill();
     }
     ctx.globalAlpha = 1;
 }
 
-// ─── Speedometer bar ─────────────────────────────────────────────────────────
+// ─── Speed bar ────────────────────────────────────────────────────────────────
 function drawSpeedBar() {
-    const barX = ROAD_RIGHT + 6, barY = 60, barW = 10, barH = H - 120;
-    ctx.fillStyle = '#222';
-    ctx.fillRect(barX, barY, barW, barH);
-    const pct = (roadSpeed - ROAD_SPEED_MIN) / (ROAD_SPEED_MAX - ROAD_SPEED_MIN);
-    const fillH = barH * pct;
-    const r = Math.floor(255 * pct), g = Math.floor(255 * (1 - pct));
-    ctx.fillStyle = `rgb(${r},${g},0)`;
-    ctx.fillRect(barX, barY + barH - fillH, barW, fillH);
-    ctx.strokeStyle = '#555';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(barX, barY, barW, barH);
-    ctx.fillStyle = '#888';
-    ctx.font = '9px Courier New';
-    ctx.textAlign = 'center';
-    ctx.fillText('SPD', barX + barW/2, barY - 4);
-}
-
-// ─── Player movement ──────────────────────────────────────────────────────────
-function updatePlayer() {
-    if (player.invincible > 0) player.invincible--;
-
-    // Speed (Up/Down)
-    const speedAccel = 0.15;
-    if (keys['ArrowUp']   || keys['KeyW']) roadSpeed = clamp(roadSpeed + speedAccel, ROAD_SPEED_MIN, ROAD_SPEED_MAX);
-    if (keys['ArrowDown'] || keys['KeyS']) roadSpeed = clamp(roadSpeed - speedAccel, ROAD_SPEED_MIN, ROAD_SPEED_MAX);
-
-    // Steering (Left/Right)
-    const accel = 0.5, friction = 0.85, maxVX = 4;
-    if (keys['ArrowLeft']  || keys['KeyA']) player.vx -= accel;
-    if (keys['ArrowRight'] || keys['KeyD']) player.vx += accel;
-    player.vx *= friction;
-    player.vx  = clamp(player.vx, -maxVX, maxVX);
-    player.x  += player.vx;
-    player.x   = clamp(player.x, ROAD_LEFT + PLAYER_W/2, ROAD_RIGHT - PLAYER_W/2);
-
-    // Auto fire when holding space
-    if (keys['Space']) fireBullet();
+    const bx = ROAD_RIGHT+6, by = 60, bw = 10, bh = H-120;
+    ctx.fillStyle = '#222'; ctx.fillRect(bx, by, bw, bh);
+    const pct = (roadSpeed-ROAD_SPEED_MIN)/(ROAD_SPEED_MAX-ROAD_SPEED_MIN);
+    const fh = bh*pct;
+    const r = Math.floor(255*pct), g2 = Math.floor(255*(1-pct));
+    ctx.fillStyle = `rgb(${r},${g2},0)`;
+    ctx.fillRect(bx, by+bh-fh, bw, fh);
+    ctx.strokeStyle = '#555'; ctx.lineWidth = 1; ctx.strokeRect(bx, by, bw, bh);
+    ctx.fillStyle = '#888'; ctx.font = '9px Courier New'; ctx.textAlign = 'center';
+    ctx.fillText('SPD', bx+bw/2, by-4);
 }
 
 // ─── Hit / death ──────────────────────────────────────────────────────────────
 function hitPlayer() {
-    lives--;
-    updateUI();
+    lives--; updateUI();
     if (lives <= 0) {
         state = 'gameover';
         if (score > hiScore) hiScore = score;
         updateUI();
     } else {
-        state = 'dead';
-        deathTimer = 90;
-        player.invincible = 0;
+        state = 'dead'; deathTimer = 90; player.invincible = 0;
     }
 }
 
-// ─── UI update ────────────────────────────────────────────────────────────────
+// ─── UI ───────────────────────────────────────────────────────────────────────
 function updateUI() {
-    scoreEl.textContent  = score;
-    livesEl.textContent  = lives;
-    hiEl.textContent     = hiScore;
-    const w = playerWeapon();
-    let weapStr = w;
-    if (w === 'OIL')   weapStr = `OIL (${player.oilCount})`;
-    if (w === 'SMOKE') weapStr = `SMOKE (${player.smokeCount})`;
-    weaponEl.textContent = weapStr;
-}
-
-// ─── Overlay screens ─────────────────────────────────────────────────────────
-function drawTitle() {
-    ctx.fillStyle = 'rgba(0,0,0,0.7)';
-    ctx.fillRect(0, 0, W, H);
-
-    ctx.textAlign = 'center';
-
-    // Title
-    ctx.font = 'bold 48px Courier New';
-    ctx.fillStyle = '#ffdd00';
-    ctx.fillText('SPY', W/2, H/2 - 80);
-    ctx.fillStyle = '#ff4444';
-    ctx.fillText('HUNTER', W/2, H/2 - 30);
-
-    ctx.font = '14px Courier New';
-    ctx.fillStyle = '#aaa';
-    ctx.fillText('UP / DOWN      — accelerate / brake', W/2, H/2 + 30);
-    ctx.fillText('LEFT / RIGHT   — steer', W/2, H/2 + 52);
-    ctx.fillText('SPACE          — fire', W/2, H/2 + 74);
-    ctx.fillText('Z              — drop oil slick', W/2, H/2 + 96);
-    ctx.fillText('X              — smoke screen', W/2, H/2 + 118);
-
-    ctx.font = 'bold 16px Courier New';
-    ctx.fillStyle = Math.floor(frameCount / 20) % 2 ? '#fff' : '#888';
-    ctx.fillText('PRESS SPACE TO START', W/2, H/2 + 160);
-}
-
-function drawDeadScreen() {
-    ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    ctx.fillRect(0, 0, W, H);
-    ctx.textAlign = 'center';
-    ctx.font = 'bold 28px Courier New';
-    ctx.fillStyle = '#ff4444';
-    ctx.fillText('WRECKED!', W/2, H/2);
-    ctx.font = '14px Courier New';
-    ctx.fillStyle = '#aaa';
-    ctx.fillText(`${lives} ${lives === 1 ? 'life' : 'lives'} remaining`, W/2, H/2 + 30);
-}
-
-function drawGameOver() {
-    ctx.fillStyle = 'rgba(0,0,0,0.75)';
-    ctx.fillRect(0, 0, W, H);
-    ctx.textAlign = 'center';
-    ctx.font = 'bold 36px Courier New';
-    ctx.fillStyle = '#ff4444';
-    ctx.fillText('GAME OVER', W/2, H/2 - 40);
-    ctx.font = '18px Courier New';
-    ctx.fillStyle = '#ffdd00';
-    ctx.fillText(`SCORE: ${score}`, W/2, H/2);
-    if (score === hiScore && score > 0) {
-        ctx.fillStyle = '#44ffaa';
-        ctx.fillText('NEW HIGH SCORE!', W/2, H/2 + 28);
-    }
-    ctx.font = 'bold 14px Courier New';
-    ctx.fillStyle = Math.floor(frameCount / 20) % 2 ? '#fff' : '#888';
-    ctx.fillText('PRESS SPACE TO PLAY AGAIN', W/2, H/2 + 70);
+    scoreEl.textContent = score; livesEl.textContent = lives; hiEl.textContent = hiScore;
+    const w = player.weapons[player.weaponIdx];
+    weaponEl.textContent = w === 'OIL' ? `OIL (${player.oilCount})`
+                         : w === 'SMOKE' ? `SMOKE (${player.smokeCount})` : w;
 }
 
 // ─── Score ticker ─────────────────────────────────────────────────────────────
 let lastScoreTick = 0;
 function tickScore() {
-    // Award points just for surviving
-    if (frameCount - lastScoreTick >= 30) {
-        score += 10;
-        lastScoreTick = frameCount;
-        updateUI();
-    }
+    if (frameCount - lastScoreTick >= 30) { score += 10; lastScoreTick = frameCount; updateUI(); }
+}
+
+// ─── Screens ──────────────────────────────────────────────────────────────────
+function drawTitle() {
+    ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(0,0,W,H);
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 48px Courier New'; ctx.fillStyle = '#ffdd00'; ctx.fillText('SPY', W/2, H/2-80);
+    ctx.fillStyle = '#ff4444'; ctx.fillText('HUNTER', W/2, H/2-30);
+    ctx.font = '14px Courier New'; ctx.fillStyle = '#aaa';
+    ctx.fillText('UP / DOWN      — accelerate / brake', W/2, H/2+30);
+    ctx.fillText('LEFT / RIGHT   — steer', W/2, H/2+52);
+    ctx.fillText('SPACE          — fire', W/2, H/2+74);
+    ctx.fillText('Z              — drop oil slick', W/2, H/2+96);
+    ctx.fillText('X              — smoke screen', W/2, H/2+118);
+    ctx.font = 'bold 16px Courier New';
+    ctx.fillStyle = Math.floor(frameCount/20)%2 ? '#fff' : '#888';
+    ctx.fillText('PRESS SPACE TO START', W/2, H/2+160);
+}
+
+function drawDeadScreen() {
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0,0,W,H);
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 28px Courier New'; ctx.fillStyle = '#ff4444'; ctx.fillText('WRECKED!', W/2, H/2);
+    ctx.font = '14px Courier New'; ctx.fillStyle = '#aaa';
+    ctx.fillText(`${lives} ${lives===1?'life':'lives'} remaining`, W/2, H/2+30);
+}
+
+function drawGameOver() {
+    ctx.fillStyle = 'rgba(0,0,0,0.75)'; ctx.fillRect(0,0,W,H);
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 36px Courier New'; ctx.fillStyle = '#ff4444'; ctx.fillText('GAME OVER', W/2, H/2-40);
+    ctx.font = '18px Courier New'; ctx.fillStyle = '#ffdd00'; ctx.fillText(`SCORE: ${score}`, W/2, H/2);
+    if (score === hiScore && score > 0) { ctx.fillStyle = '#44ffaa'; ctx.fillText('NEW HIGH SCORE!', W/2, H/2+28); }
+    ctx.font = 'bold 14px Courier New';
+    ctx.fillStyle = Math.floor(frameCount/20)%2 ? '#fff' : '#888';
+    ctx.fillText('PRESS SPACE TO PLAY AGAIN', W/2, H/2+70);
 }
 
 // ─── Main loop ────────────────────────────────────────────────────────────────
@@ -763,49 +797,39 @@ function loop() {
     ctx.clearRect(0, 0, W, H);
 
     if (state === 'title') {
-        // Still draw a scrolling road behind title
-        roadY = (roadY + 3) % (H * 2);
-        drawRoad();
-        drawTrees();
-        updateTrees();
-        drawTitle();
+        roadY = (roadY + 3) % (H*2);
+        drawRoad(); drawTrees(); updateTrees(); drawTitle();
         return;
     }
 
     if (state === 'dead') {
         deathTimer--;
-        roadY = (roadY + roadSpeed) % (H * 2);
-        drawRoad();
-        drawTrees();
-        drawExplosions();
-        updateExplosions();
-        drawDeadScreen();
+        roadY = (roadY + roadSpeed) % (H*2);
+        drawRoad(); drawTrees(); drawExplosions(); updateExplosions(); drawDeadScreen();
         if (deathTimer <= 0) {
             state = 'playing';
-            player.x = W / 2;
-            player.y = H - 100;
-            player.vx = 0;
-            player.invincible = 150;
+            const g = getRoadGeom();
+            player.x = g.hasFork ? g.right - (g.right-g.islandRight)/2 : W/2;
+            player.y = H-100; player.vx = 0; player.invincible = 150;
             bullets = []; eBullets = [];
         }
         return;
     }
 
     if (state === 'gameover') {
-        drawRoad();
-        drawTrees();
-        drawGameOver();
+        drawRoad(); drawTrees(); drawGameOver();
         return;
     }
 
     // ── Playing ──
     diffTimer++;
-    // Difficulty only affects enemy spawn rate now; player controls their own speed
-    roadY = (roadY + roadSpeed) % (H * 2);
+    roadY = (roadY + roadSpeed) % (H*2);
 
-    // Update
+    updateFork();
+    updateSplitSign();
     updatePlayer();
     updateTrees();
+    updateIslandTrees();
     updateEnemies();
     updateBullets();
     updateOilAndSmoke();
@@ -813,8 +837,9 @@ function loop() {
     updateExplosions();
     tickScore();
 
-    // Draw road layer
     drawRoad();
+    drawIslandTrees();
+    drawSplitSign();
     drawTrees();
     drawOilAndSmoke();
     drawTruck();
@@ -824,14 +849,12 @@ function loop() {
     drawExplosions();
     drawSpeedBar();
 
-    // Weapon hint
     ctx.textAlign = 'left';
     ctx.font = '10px Courier New';
     ctx.fillStyle = '#555';
-    ctx.fillText('Z=OIL  X=SMOKE', ROAD_LEFT + 4, H - 6);
+    ctx.fillText('Z=OIL  X=SMOKE', ROAD_LEFT+4, H-6);
 }
 
-// ─── Boot ─────────────────────────────────────────────────────────────────────
 spawnTrees();
 updateUI();
 loop();
