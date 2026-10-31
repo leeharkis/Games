@@ -219,19 +219,18 @@ let stateTimer = 0;
 const keys = {};
 let wantDx = 0, wantDy = 0;
 document.addEventListener('keydown', e => {
-    keys[e.code] = true;
-    if (e.code === 'ArrowLeft')  { wantDx = -1; wantDy =  0; }
-    if (e.code === 'ArrowRight') { wantDx =  1; wantDy =  0; }
-    if (e.code === 'ArrowUp')    { wantDx =  0; wantDy = -1; }
-    if (e.code === 'ArrowDown')  { wantDx =  0; wantDy =  1; }
+    keys[e.key] = true;  // Use e.key instead of e.code for arrow keys
+    if (e.code === 'ArrowLeft')  { wantDx = -1; wantDy =  0; e.preventDefault(); }
+    if (e.code === 'ArrowRight') { wantDx =  1; wantDy =  0; e.preventDefault(); }
+    if (e.code === 'ArrowUp')    { wantDx =  0; wantDy = -1; e.preventDefault(); }
+    if (e.code === 'ArrowDown')  { wantDx =  0; wantDy =  1; e.preventDefault(); }
     if ((state === 'title' || state === 'gameover') &&
         (e.code === 'Space' || e.code === 'Enter')) startGame();
     if ((state === 'ready') && (e.code === 'Space' || e.code === 'Enter')) {
         state = 'playing';
     }
-    e.preventDefault();
 });
-document.addEventListener('keyup', e => { keys[e.code] = false; });
+document.addEventListener('keyup', e => { keys[e.key] = false; });
 
 // ─── Pac-Man ──────────────────────────────────────────────────────────────────
 const PAC_SPEED = 1.5;
@@ -315,10 +314,10 @@ function updatePac() {
     if (pac.mouthA <= 0.02) pac.mouthDir =  1;
 
     // Continuous key hold
-    if (keys['ArrowLeft'])  { wantDx = -1; wantDy =  0; }
-    if (keys['ArrowRight']) { wantDx =  1; wantDy =  0; }
-    if (keys['ArrowUp'])    { wantDx =  0; wantDy = -1; }
-    if (keys['ArrowDown'])  { wantDx =  0; wantDy =  1; }
+    if (keys['ArrowLeft'] || keys['a'] || keys['A'])  { wantDx = -1; wantDy =  0; }
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) { wantDx =  1; wantDy =  0; }
+    if (keys['ArrowUp'] || keys['w'] || keys['W'])    { wantDx =  0; wantDy = -1; }
+    if (keys['ArrowDown'] || keys['s'] || keys['S'])  { wantDx =  0; wantDy =  1; }
 
     // Snap threshold: only check turn/stop when very close to tile centre
     const cx = tpx(pac.col), cy = tpy(pac.row);
