@@ -680,11 +680,11 @@ function loop() {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, W, H);
 
-    // Version number
-    ctx.fillStyle = '#666666';
-    ctx.font = '11px monospace';
-    ctx.textAlign = 'right';
-    ctx.fillText('v1.1', W - 5, H - 3);
+    // Version number (visible in top-left)
+    ctx.fillStyle = '#aaaaaa';
+    ctx.font = 'bold 12px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('v1.1', 5, 15);
 
     if (state === 'title') {
         buildMaze();
