@@ -680,16 +680,15 @@ function loop() {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, W, H);
 
-    // Version number (visible in top-left)
-    ctx.fillStyle = '#aaaaaa';
-    ctx.font = 'bold 12px monospace';
-    ctx.textAlign = 'left';
-    ctx.fillText('v1.1', 5, 15);
-
     if (state === 'title') {
         buildMaze();
         drawMaze();
         drawTitle();
+        // Version number
+        ctx.fillStyle = '#aaaaaa';
+        ctx.font = 'bold 12px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText('v1.1', 5, 15);
         return;
     }
 
@@ -734,6 +733,12 @@ function loop() {
     drawLives();
 
     if (state === 'gameover') drawGameOver();
+
+    // Version number - drawn last so it's always visible
+    ctx.fillStyle = '#aaaaaa';
+    ctx.font = 'bold 12px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('v1.1', 5, 15);
 }
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
