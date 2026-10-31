@@ -220,24 +220,18 @@ const keys = {};
 let wantDx = 0, wantDy = 0;
 document.addEventListener('keydown', e => {
     keys[e.code] = true;
-    if (e.code === 'ArrowLeft')  { wantDx = -1; wantDy =  0; e.preventDefault(); }
-    if (e.code === 'ArrowRight') { wantDx =  1; wantDy =  0; e.preventDefault(); }
-    if (e.code === 'ArrowUp')    { wantDx =  0; wantDy = -1; e.preventDefault(); }
-    if (e.code === 'ArrowDown')  { wantDx =  0; wantDy =  1; e.preventDefault(); }
+    if (e.code === 'ArrowLeft')  { wantDx = -1; wantDy =  0; }
+    if (e.code === 'ArrowRight') { wantDx =  1; wantDy =  0; }
+    if (e.code === 'ArrowUp')    { wantDx =  0; wantDy = -1; }
+    if (e.code === 'ArrowDown')  { wantDx =  0; wantDy =  1; }
     if ((state === 'title' || state === 'gameover') &&
         (e.code === 'Space' || e.code === 'Enter')) startGame();
     if ((state === 'ready') && (e.code === 'Space' || e.code === 'Enter')) {
         state = 'playing';
     }
+    e.preventDefault();
 });
-document.addEventListener('keyup', e => { 
-    keys[e.code] = false;
-    // When arrow key released, clear the wanted direction
-    if (e.code === 'ArrowLeft' || e.code === 'ArrowRight' || 
-        e.code === 'ArrowUp' || e.code === 'ArrowDown') {
-        wantDx = 0; wantDy = 0;
-    }
-});
+document.addEventListener('keyup', e => { keys[e.code] = false; });
 
 // ─── Pac-Man ──────────────────────────────────────────────────────────────────
 const PAC_SPEED = 1.5;
@@ -303,7 +297,8 @@ function beginLevel() {
     frameCount = 0;
     pacReset();
     ghostReset();
-    state = 'playing'; // Go straight to playing, not ready
+    state = 'ready';
+    stateTimer = 120; // show "READY!" for 2 sec
     updateUI();
 }
 
@@ -318,6 +313,12 @@ function updatePac() {
     pac.mouthA += 0.055 * pac.mouthDir;
     if (pac.mouthA >= 0.23) pac.mouthDir = -1;
     if (pac.mouthA <= 0.02) pac.mouthDir =  1;
+
+    // Continuous key hold
+    if (keys['ArrowLeft'])  { wantDx = -1; wantDy =  0; }
+    if (keys['ArrowRight']) { wantDx =  1; wantDy =  0; }
+    if (keys['ArrowUp'])    { wantDx =  0; wantDy = -1; }
+    if (keys['ArrowDown'])  { wantDx =  0; wantDy =  1; }
 
     // Snap threshold: only check turn/stop when very close to tile centre
     const cx = tpx(pac.col), cy = tpy(pac.row);
