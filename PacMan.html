@@ -303,8 +303,7 @@ function beginLevel() {
     frameCount = 0;
     pacReset();
     ghostReset();
-    state = 'ready';
-    stateTimer = 120; // show "READY!" for 2 sec
+    state = 'playing'; // Go straight to playing, not ready
     updateUI();
 }
 
